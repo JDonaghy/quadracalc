@@ -1,0 +1,18 @@
+[package]
+name = "quadracalc-win"
+description = "quadracalc: native Windows window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "quadracalc-win"
+path = "src/main.rs"
+
+[dependencies]
+quadracalc-core = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+quadraui = { workspace = true, features = ["win"] }

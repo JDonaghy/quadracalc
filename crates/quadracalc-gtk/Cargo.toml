@@ -1,0 +1,16 @@
+[package]
+name = "quadracalc-gtk"
+description = "quadracalc: GTK4 window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "quadracalc-gtk"
+path = "src/main.rs"
+
+[dependencies]
+quadraui = { workspace = true, features = ["gtk"] }
+quadracalc-core = { workspace = true }

@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/quadracalc-core", "crates/quadracalc"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/JDonaghy/quadracalc"
+publish = false
+
+[workspace.dependencies]
+# quadraui is pinned to a develop revision until 0.12 is published, because
+# CellGrid (quadraui#2732) only exists on develop. Switch to `quadraui = "0.12"`
+# once it's released.
+quadraui = { git = "https://github.com/JDonaghy/quadraui", rev = "da380deb2d16b84101aee55d0d6b7a868e276bb8", default-features = false }
+# GridCraft's engine, used unchanged and pinned by full SHA. Never fork it;
+# upstream any fix to storytold/gridcraft instead.
+gridcraft-engine = { git = "https://github.com/storytold/gridcraft", rev = "3b062063270e37c6f8c1fcbfb2ea206e6d1f868b" }
+serde_json = "1"
+anyhow = "1"
+quadracalc-core = { path = "crates/quadracalc-core" }

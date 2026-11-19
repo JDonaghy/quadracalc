@@ -1,0 +1,18 @@
+[package]
+name = "quadracalc-mac"
+description = "quadracalc: native macOS window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "quadracalc-mac"
+path = "src/main.rs"
+
+[dependencies]
+quadracalc-core = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+quadraui = { workspace = true, features = ["macos"] }
