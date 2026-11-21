@@ -12,7 +12,7 @@
 
 use quadraui::tui::TuiBackend;
 use quadraui::tui::testing::TuiDriver;
-use quadraui::{AppLogic, Backend, Key, Modifiers, UiEvent, Viewport};
+use quadraui::{AppLogic, Backend, Key, Modifiers, NamedKey, UiEvent, Viewport};
 use serde_json::json;
 
 use quadracalc_core::CalcApp;
@@ -42,7 +42,7 @@ fn ctrl_char(app: &mut CalcApp, b: &mut TuiBackend, c: char) {
     );
 }
 
-fn press_named(app: &mut CalcApp, b: &mut TuiBackend, named: quadraui::NamedKey) {
+fn press_named(app: &mut CalcApp, b: &mut TuiBackend, named: NamedKey) {
     app.handle(
         UiEvent::KeyPressed {
             key: Key::Named(named),
@@ -56,7 +56,7 @@ fn press_named(app: &mut CalcApp, b: &mut TuiBackend, named: quadraui::NamedKey)
 fn shift_down(app: &mut CalcApp, b: &mut TuiBackend) {
     app.handle(
         UiEvent::KeyPressed {
-            key: Key::Named(quadraui::NamedKey::Down),
+            key: Key::Named(NamedKey::Down),
             modifiers: Modifiers {
                 shift: true,
                 ..Default::default()
@@ -189,11 +189,12 @@ fn ctrl_d_through_handle_fills_down_the_selection() {
     app.set_cell("A1", "5").unwrap();
     app.set_cell("A2", "6").unwrap();
     app.set_cell("B1", "=A1*2").unwrap();
-    app.setup(&mut b); // re-refresh after the direct `set_cell` calls
 
     // Real navigation, so the UI's own selection (what `sync_selection`
-    // reads) covers B1:B2, not just the default single-cell A1.
-    press_named(&mut app, &mut b, quadraui::NamedKey::Right);
+    // reads) covers B1:B2, not just the default single-cell A1. The
+    // first dispatch below also refreshes the view after the direct
+    // `set_cell` calls above, same as any other `handle` call would.
+    press_named(&mut app, &mut b, NamedKey::Right);
     shift_down(&mut app, &mut b);
     assert_eq!(app.view().selection_label, "B1:B2");
 
@@ -215,7 +216,7 @@ fn tui_driver_fill_down_shows_the_recalculated_values() {
     driver.app_mut().set_cell("B1", "=A1*2").unwrap();
     // `set_cell` talks to the engine directly and never refreshes the
     // view itself — a plain navigation dispatch below is what repaints.
-    driver.press_named(quadraui::NamedKey::Right);
+    driver.press_named(NamedKey::Right);
     let before = driver.screen();
     assert!(
         before.contains("1000"),
@@ -225,7 +226,7 @@ fn tui_driver_fill_down_shows_the_recalculated_values() {
     // Real navigation builds the selection B1:B3, so `sync_selection`
     // picks it up the same way a live keyboard-driven fill would.
     driver.dispatch(UiEvent::KeyPressed {
-        key: Key::Named(quadraui::NamedKey::Down),
+        key: Key::Named(NamedKey::Down),
         modifiers: Modifiers {
             shift: true,
             ..Default::default()
@@ -233,7 +234,7 @@ fn tui_driver_fill_down_shows_the_recalculated_values() {
         repeat: false,
     });
     driver.dispatch(UiEvent::KeyPressed {
-        key: Key::Named(quadraui::NamedKey::Down),
+        key: Key::Named(NamedKey::Down),
         modifiers: Modifiers {
             shift: true,
             ..Default::default()
@@ -253,4 +254,55 @@ fn tui_driver_fill_down_shows_the_recalculated_values() {
         after.contains("1400"),
         "B3 should recalculate to 1400 on screen after fill-down:\n{after}"
     );
+}
+
+#[test]
+fn ctrl_v_through_dispatch_pastes_a_copied_formula_with_adjusted_references() {
+    // Drives the *production* paste path end to end: a real Ctrl+C through
+    // `dispatch_event` arms the engine's own clipboard, then a real
+    // Ctrl+V — also through `dispatch_event`, quadraui's full
+    // backend-translation + preprocessing pipeline, not a direct
+    // `CalcApp::execute("edit.paste", …)` call — reaches
+    // `CellGridController::handle`'s `UiEvent::ClipboardPaste` arm,
+    // which reports `CellGridControllerEvent::PasteRequested` for
+    // `CalcApp::apply_controller_event` to turn into `edit.paste`. This
+    // is the exact path that was unreachable before: the system
+    // clipboard this process actually has (headless, no
+    // `DISPLAY`/`WAYLAND_DISPLAY`) never reads back what it wrote, so
+    // `UiEvent::ClipboardPaste` is injected directly with the text the
+    // copy produced — standing in for "the OS clipboard round-tripped
+    // it", which `crate::clipboard`'s non-blocking concern about
+    // `TuiClipboard`'s write/read asymmetry covers separately — while
+    // still exercising every line downstream of that event through the
+    // real dispatcher.
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
+    driver.app_mut().set_cell("A1", "10").unwrap();
+    driver.app_mut().set_cell("B1", "=A1*2").unwrap();
+    driver.press_named(NamedKey::Right);
+    assert_eq!(driver.app().view().selection_label, "B1");
+
+    driver.ctrl_char('c');
+    let copied_text = driver.app_mut().cell_text("B1");
+    assert_eq!(copied_text, "20");
+
+    for _ in 0..4 {
+        driver.press_named(NamedKey::Down);
+    }
+    assert_eq!(driver.app().view().selection_label, "B5");
+
+    driver.dispatch(UiEvent::ClipboardPaste(copied_text));
+
+    assert!(
+        driver.app().view().error.is_none(),
+        "{:?}",
+        driver.app().view().error
+    );
+    assert_eq!(
+        driver.app_mut().cell_input("B5"),
+        "=A5*2",
+        "pasting four rows down should shift the relative reference by four rows"
+    );
+    assert_eq!(driver.app_mut().cell_text("B5"), "0");
+    // The source is untouched by a copy, same as the core-level test.
+    assert_eq!(driver.app_mut().cell_input("B1"), "=A1*2");
 }
