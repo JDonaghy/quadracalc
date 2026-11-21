@@ -639,12 +639,17 @@ impl AppLogic for CalcApp {
                 return Reaction::Redraw;
             }
         }
-        // Ctrl+C/X/V (Cmd on macOS) copy/cut/paste the selection through
-        // `crate::clipboard`'s bridge over `edit.copy`/`edit.cut`/
-        // `edit.paste`; Ctrl+D/Ctrl+R fill the selection down/right
-        // through `edit.fillDown`/`edit.fillRight`. Same "outside an
-        // active edit" guard as every other shortcut above, so none of
-        // these fight with typing a literal c/x/v/d/r into a cell.
+        // Ctrl+C/X (Cmd on macOS) copy/cut the selection through
+        // `crate::clipboard`'s bridge over `edit.copy`/`edit.cut`;
+        // Ctrl+D/Ctrl+R fill the selection down/right through
+        // `edit.fillDown`/`edit.fillRight`. Same "outside an active
+        // edit" guard as every other shortcut above, so none of these
+        // fight with typing a literal c/x/d/r into a cell. Ctrl+V has no
+        // arm here: quadraui's runtime intercepts the native paste
+        // keypress before it ever reaches `handle` as a `KeyPressed` —
+        // it arrives below as `UiEvent::ClipboardPaste`, routed through
+        // the grid controller like any other event, and lands in
+        // `apply_controller_event`'s `PasteRequested` arm instead.
         if !self.grid.is_editing()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && (modifiers.ctrl || modifiers.cmd)
@@ -654,8 +659,6 @@ impl AppLogic for CalcApp {
                 Some(clipboard::copy)
             } else if matches!(key, Key::Char('x') | Key::Char('X')) {
                 Some(clipboard::cut)
-            } else if matches!(key, Key::Char('v') | Key::Char('V')) {
-                Some(clipboard::paste)
             } else if matches!(key, Key::Char('d') | Key::Char('D')) {
                 Some(clipboard::fill_down)
             } else if matches!(key, Key::Char('r') | Key::Char('R')) {
@@ -779,6 +782,22 @@ impl CalcApp {
             // caret any more.
             CellGridControllerEvent::CellEditCancelled { .. } => {
                 self.formula_focused = false;
+                Reaction::Redraw
+            }
+            // Ctrl/Cmd+V with no edit in progress — quadraui's runtime
+            // already resolved the system clipboard's text before this
+            // ever ran (see `crate::clipboard::paste`'s own doc) and the
+            // controller anchored it at the selection's top-left corner,
+            // so this just hands both straight to `edit.paste`.
+            CellGridControllerEvent::PasteRequested {
+                anchor_row,
+                anchor_col,
+                text,
+            } => {
+                let anchor = Address::new(anchor_row as u32, anchor_col as u32).a1();
+                if let Err(e) = clipboard::paste(self, &anchor, &text) {
+                    self.error = Some(e.to_string());
+                }
                 Reaction::Redraw
             }
             _ => Reaction::Redraw,

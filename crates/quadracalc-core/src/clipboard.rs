@@ -1,7 +1,11 @@
 //! Clipboard and fill: Ctrl+C/X/V (Cmd on macOS) through the engine's own
 //! `edit.copy`/`edit.cut`/`edit.paste`, and Ctrl+D/Ctrl+R through
-//! `edit.fillDown`/`edit.fillRight` — see `CalcApp::handle`'s own
-//! shortcut dispatch, which is the only caller of everything here.
+//! `edit.fillDown`/`edit.fillRight`. `copy`/`cut`/`fill_down`/
+//! `fill_right` are called from `CalcApp::handle`'s own shortcut
+//! dispatch directly; `paste` is called from
+//! `CalcApp::apply_controller_event` instead, since quadraui's runtime
+//! intercepts the paste keypress before `handle` ever sees it (see
+//! `paste`'s own doc below).
 //!
 //! Reference adjustment (copy shifts relative references, cut doesn't),
 //! TSV parsing and the actual cell writes are the engine's job
@@ -15,12 +19,20 @@
 //!   whatever it last had selected), then mirror the copied/cut plain
 //!   text onto the system clipboard (`Backend::services().clipboard()`,
 //!   quadraui#2729) so it round-trips into another app.
-//! - `paste` reads the system clipboard first. `edit.paste` treats a
-//!   `text` param that differs from what the engine's own clipboard
-//!   already holds as plain TSV pasted from outside and fills the range
-//!   from the cursor; text that matches (or no system clipboard text at
-//!   all, e.g. nothing was ever copied) falls through to the engine's own
-//!   richer internal clipboard instead — see `edit.paste`'s own doc.
+//! - `paste` takes the anchor and text quadraui's own runtime already
+//!   resolved before `AppLogic::handle` ever ran: the native paste
+//!   keypress (Ctrl/Cmd+V) is intercepted upstream (`runtime::
+//!   preprocess_event`'s step 6) and delivered as `UiEvent::
+//!   ClipboardPaste(text)`, which `CellGridController::handle` turns into
+//!   `CellGridControllerEvent::PasteRequested { anchor_row, anchor_col,
+//!   text }` anchored at the selection's top-left corner — see
+//!   `CalcApp::apply_controller_event`, the only caller of `paste` here.
+//!   `edit.paste` treats a `text` param that differs from what the
+//!   engine's own clipboard already holds as plain TSV pasted from
+//!   outside and fills the range from `at`; text that matches (an in-app
+//!   copy round-tripped through the system clipboard) falls through to
+//!   the engine's own richer internal clipboard instead — see
+//!   `edit.paste`'s own doc.
 //! - `fill_down`/`fill_right` touch no clipboard at all, just the
 //!   selection.
 
@@ -46,23 +58,19 @@ pub(crate) fn cut(app: &mut CalcApp, backend: &mut dyn Backend) -> anyhow::Resul
 fn run_and_mirror(app: &mut CalcApp, backend: &mut dyn Backend, id: &str) -> anyhow::Result<()> {
     app.sync_selection()?;
     let result = app.execute(id, json!({}))?;
-    if let Some(text) = result.get("text").and_then(Value::as_str) {
+    if let Some(text) = result.get("text").and_then(Value::as_str)
+        && !text.is_empty()
+    {
         backend.services().clipboard().write_text(text);
     }
     Ok(())
 }
 
-/// Ctrl+V: `edit.paste` at the cursor, with whatever plain text the
-/// system clipboard holds right now (if any) passed through as `text` —
-/// see the module doc for how the engine picks between that and its own
-/// internal clipboard.
-pub(crate) fn paste(app: &mut CalcApp, backend: &mut dyn Backend) -> anyhow::Result<()> {
-    app.sync_selection()?;
-    let mut params = json!({});
-    if let Some(text) = backend.services().clipboard().read_text() {
-        params["text"] = Value::String(text);
-    }
-    app.execute("edit.paste", params)?;
+/// Ctrl+V: `edit.paste` at `anchor` (an A1 cell reference) with `text` —
+/// both already resolved by quadraui before this ever runs, see the
+/// module doc.
+pub(crate) fn paste(app: &mut CalcApp, anchor: &str, text: &str) -> anyhow::Result<()> {
+    app.execute("edit.paste", json!({ "at": anchor, "text": text }))?;
     Ok(())
 }
 
