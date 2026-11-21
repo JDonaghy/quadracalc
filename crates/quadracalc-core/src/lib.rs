@@ -8,9 +8,10 @@
 //! surfaces; the per-backend binaries only hand [`CalcApp`] to a runner.
 
 mod address;
+pub mod agent;
 mod app;
 mod formula_bar;
 pub mod palette;
 
 pub use address::{Address, column_label};
-pub use app::CalcApp;
+pub use app::{CalcApp, View};

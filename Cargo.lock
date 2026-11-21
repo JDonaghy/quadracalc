@@ -3017,6 +3017,7 @@ dependencies = [
  "anyhow",
  "gridcraft-engine",
  "quadraui",
+ "quadraui-mcp",
  "serde_json",
 ]
 
@@ -3076,6 +3077,15 @@ dependencies = [
  "windows-numerics",
  "yeslogic-fontconfig-sys",
  "zbus",
+]
+
+[[package]]
+name = "quadraui-mcp"
+version = "0.1.0"
+source = "git+https://github.com/JDonaghy/quadraui?rev=94433ba130f685af32d731e7d1a5fb47cf4a5051#94433ba130f685af32d731e7d1a5fb47cf4a5051"
+dependencies = [
+ "quadraui",
+ "serde_json",
 ]
 
 [[package]]
