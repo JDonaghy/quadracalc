@@ -93,8 +93,10 @@ fn classify(session: &Session, id: &str) -> (bool, Option<String>) {
 /// heuristic: it only looks at the first balanced `{…}` group and splits
 /// on top-level commas. Good enough to tell "nothing required" apart
 /// from "something required" for every command in `CATALOG` today;
-/// anything it can't parse is treated as required (safer to hide a row
-/// than to run a command against params it didn't actually have).
+/// anything it can't parse (no brace group at all) is treated as
+/// "nothing required" rather than disabling the row, since a doc string
+/// this heuristic can't read is far more likely to be a `{}`-free command
+/// than a required field it failed to spot.
 fn unsuppliable_params(params: &str) -> Option<String> {
     let open = params.find('{')?;
     let close = matching_brace(params, open)?;

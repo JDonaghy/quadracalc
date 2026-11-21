@@ -222,6 +222,32 @@ impl CalcApp {
         Address::new(row as u32, col as u32)
     }
 
+    /// Push the UI's own cursor/selection (`CellGridController`, which the
+    /// engine never sees) into the engine's `doc().selection` via
+    /// `selection.set`, so a command run with no explicit `range`/`cell`
+    /// (every palette run, `edit.undo`/`edit.redo`) resolves against what
+    /// the user actually has selected instead of the engine's own
+    /// `Default` (`Selection::at(CellRef::default())`, i.e. A1) — see
+    /// `gridcraft_engine::cmd::target_ranges`. Called before every command
+    /// the palette can run, and before snapshotting the catalog's own
+    /// classification, since a precondition (`spec.info(session)`) can
+    /// also depend on the selection.
+    fn sync_selection(&mut self) -> anyhow::Result<()> {
+        let a1 = self.cursor().a1();
+        let (top, left, bottom, right) = self.grid.selection_bounds();
+        let range = if top == bottom && left == right {
+            a1.clone()
+        } else {
+            format!(
+                "{}:{}",
+                Address::new(top as u32, left as u32).a1(),
+                Address::new(bottom as u32, right as u32).a1()
+            )
+        };
+        self.execute("selection.set", json!({ "range": range, "active": a1 }))?;
+        Ok(())
+    }
+
     pub fn view(&self) -> &View {
         &self.view
     }
@@ -460,10 +486,17 @@ impl AppLogic for CalcApp {
         self.error = None;
         // The palette is modal: while it's open, every key goes to it
         // (its own doc: "intercept ALL mouse and keyboard events when
-        // open") and nothing else in `handle` runs — a click or a
-        // resize underneath it is swallowed rather than reaching the
-        // grid, same as a dialog/context-menu overlay would.
+        // open") and nothing else in `handle` runs — a click underneath
+        // it is swallowed rather than reaching the grid, same as a
+        // dialog/context-menu overlay would. A resize still needs
+        // `refresh` so the grid behind the palette isn't left painting a
+        // stale window once the palette closes (same reasoning as the
+        // `WindowResized` arm below).
         if let Some(palette) = self.palette.as_mut() {
+            if matches!(event, UiEvent::WindowResized { .. }) {
+                self.refresh(backend);
+                return Reaction::Continue;
+            }
             let UiEvent::KeyPressed { key, modifiers, .. } = &event else {
                 return Reaction::Continue;
             };
@@ -475,7 +508,14 @@ impl AppLogic for CalcApp {
                 }
                 PaletteOutcome::Run(id) => {
                     self.palette = None;
-                    if let Err(e) = self.execute(id, json!({})) {
+                    // The palette was classified and is now run against
+                    // the UI's own selection, not necessarily the one the
+                    // engine still has cached from the last `cell.set`/
+                    // `edit.undo` — see `sync_selection`'s own doc.
+                    if let Err(e) = self
+                        .sync_selection()
+                        .and_then(|()| self.execute(id, json!({})))
+                    {
                         self.error = Some(e.to_string());
                     }
                     self.refresh(backend);
@@ -497,6 +537,13 @@ impl AppLogic for CalcApp {
                 && matches!(key, Key::Char('p') | Key::Char('P'));
             let colon_on_tui = Self::is_tui_shaped(backend) && matches!(key, Key::Char(':'));
             if ctrl_shift_p || colon_on_tui {
+                // Classification (`spec.info(session)`'s own preconditions)
+                // reads the engine's selection, so it must already match
+                // the UI's before `CommandPalette::open` snapshots it —
+                // see `sync_selection`'s own doc.
+                if let Err(e) = self.sync_selection() {
+                    self.error = Some(e.to_string());
+                }
                 self.palette = Some(CommandPalette::open(&self.session));
                 return Reaction::Redraw;
             }
@@ -753,6 +800,29 @@ mod tests {
         b.begin_frame(grown);
         let reaction = app.handle(UiEvent::WindowResized { viewport: grown }, &mut b);
         assert_eq!(reaction, Reaction::Redraw);
+        let rows_after = app.view().grid.as_ref().unwrap().cells.len();
+        assert!(
+            rows_after > rows_before,
+            "resize should load more rows: before={rows_before} after={rows_after}"
+        );
+    }
+
+    #[test]
+    fn window_resize_refreshes_the_view_even_while_the_palette_is_open() {
+        let mut app = CalcApp::new();
+        let mut b = backend();
+        app.setup(&mut b);
+        app.palette = Some(CommandPalette::open(&app.session));
+        let rows_before = app.view().grid.as_ref().unwrap().cells.len();
+
+        let grown = Viewport::new(40.0, 200.0, 1.0);
+        b.begin_frame(grown);
+        let reaction = app.handle(UiEvent::WindowResized { viewport: grown }, &mut b);
+        // Swallowed from the grid's own dispatch, same as every other
+        // event while the palette is modal, but the view behind it is
+        // still refreshed.
+        assert_eq!(reaction, Reaction::Continue);
+        assert!(app.palette.is_some(), "the palette should stay open");
         let rows_after = app.view().grid.as_ref().unwrap().cells.len();
         assert!(
             rows_after > rows_before,
