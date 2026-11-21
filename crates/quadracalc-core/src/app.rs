@@ -21,7 +21,7 @@ use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
     MouseButton, NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface,
-    TextField, UiEvent, WidgetId,
+    TabBar, TabBarHit, TextField, UiEvent, WidgetId,
 };
 use serde_json::{Value, json};
 
@@ -30,6 +30,7 @@ use crate::agent;
 use crate::clipboard;
 use crate::formula_bar::{self, Bands};
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
+use crate::sheets;
 
 /// Rows in the demo sheet — far more than any terminal or window shows at
 /// once, so scrolling to a distant row exercises `CellGrid`'s own
@@ -71,6 +72,11 @@ pub struct CalcApp {
     /// get a backend, so it refreshes here instead — see that impl's
     /// own comment.
     agent_refresh_pending: bool,
+    /// Every sheet's own `CellGridController` cursor/selection/scroll,
+    /// so switching sheets and back restores exactly where the user left
+    /// off — see `crate::sheets`'s module doc for why this lives here
+    /// rather than in the engine.
+    sheet_cursors: sheets::SheetCursors,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -81,6 +87,10 @@ pub struct View {
     /// `CellGridController::layout` reported as visible. `None` only
     /// before the first `setup`/`handle` call ever runs.
     pub grid: Option<CellGrid>,
+    /// This frame's sheet tabs — the engine's own sheet list, rebuilt by
+    /// `crate::sheets::tab_bar` on every `refresh`. `None` only before
+    /// the first `setup`/`handle` call ever runs, same as `grid`.
+    pub tab_bar: Option<TabBar>,
     /// The cursor's address, or `top:bottom` range notation for a
     /// multi-cell selection.
     pub selection_label: String,
@@ -113,6 +123,7 @@ impl CalcApp {
             palette: None,
             commands: agent::registry(),
             agent_refresh_pending: false,
+            sheet_cursors: sheets::SheetCursors::default(),
         }
     }
 
@@ -238,6 +249,57 @@ impl CalcApp {
         Address::new(row as u32, col as u32)
     }
 
+    /// Sheet names in workbook order, exactly as the engine has them —
+    /// what the tab bar shows.
+    pub fn sheet_names(&self) -> Vec<String> {
+        sheets::sheet_names(&self.session)
+    }
+
+    /// The active sheet's index into `sheet_names`.
+    pub fn active_sheet_index(&self) -> usize {
+        sheets::active_sheet_index(&self.session)
+    }
+
+    /// `sheet.activate`: switch to the sheet at `index`, restoring that
+    /// sheet's own remembered cursor/selection/scroll.
+    pub fn activate_sheet(&mut self, index: usize) -> anyhow::Result<()> {
+        self.switch_sheet("sheet.activate", json!({ "sheet": index }))
+    }
+
+    /// `sheet.next`: switch to the next visible sheet (skipping hidden
+    /// ones), or stay put if the active sheet is already the last one.
+    pub fn next_sheet(&mut self) -> anyhow::Result<()> {
+        self.switch_sheet("sheet.next", json!({}))
+    }
+
+    /// `sheet.previous`: switch to the previous visible sheet (skipping
+    /// hidden ones), or stay put if the active sheet is already the
+    /// first one.
+    pub fn previous_sheet(&mut self) -> anyhow::Result<()> {
+        self.switch_sheet("sheet.previous", json!({}))
+    }
+
+    /// Run a sheet-switching command and swap `self.grid`'s cursor/
+    /// selection/scroll for whichever sheet it lands on — the one piece
+    /// of a sheet switch the engine has no concept of (see
+    /// `crate::sheets`'s module doc). `id` must be one of
+    /// `sheet.activate`/`sheet.next`/`sheet.previous`; any other command
+    /// still runs, but a command that doesn't change the active sheet
+    /// just saves and restores the same sheet's own state, a harmless
+    /// no-op.
+    fn switch_sheet(&mut self, id: &str, params: Value) -> anyhow::Result<()> {
+        let leaving = sheets::active_sheet_name(&self.session);
+        self.execute(id, params)?;
+        if let Some(leaving) = leaving {
+            self.sheet_cursors
+                .save(&leaving, sheets::CursorMemory::capture(&self.grid));
+        }
+        if let Some(arriving) = sheets::active_sheet_name(&self.session) {
+            self.sheet_cursors.get(&arriving).restore(&mut self.grid);
+        }
+        Ok(())
+    }
+
     /// Push the UI's own cursor/selection (`CellGridController`, which the
     /// engine never sees) into the engine's `doc().selection` via
     /// `selection.set`, so a command run with no explicit `range`/`cell`
@@ -279,10 +341,35 @@ impl CalcApp {
         formula_bar::bands(vp.width, vp.height, lh)
     }
 
-    /// The grid body's rect — the viewport minus the formula bar and the
-    /// status bar.
+    /// The grid body's rect — the viewport minus the formula bar, the
+    /// status bar and the sheet-tabs strip.
     fn grid_rect(backend: &dyn Backend) -> Rect {
-        Self::bands(backend).grid
+        Self::carve_tab_strip(Self::bands(backend)).0
+    }
+
+    /// The sheet-tabs strip's rect.
+    fn tab_bar_rect(backend: &dyn Backend) -> Rect {
+        Self::carve_tab_strip(Self::bands(backend)).1
+    }
+
+    /// `(grid rect, tab-strip rect)`: `formula_bar::bands` only knows
+    /// about the two chrome bands every backend's `Bands` struct has
+    /// room for; this app is the only one that needs a third strip, so
+    /// it carves it here instead of adding a field there. The strip
+    /// takes `bands.status`'s own height off the bottom of `bands.grid`
+    /// and sits directly above the status bar — the same "one chrome
+    /// row" sizing the formula/status bars already use.
+    fn carve_tab_strip(bands: Bands) -> (Rect, Rect) {
+        let tabs_h = bands.status.height.min(bands.grid.height);
+        let grid_h = bands.grid.height - tabs_h;
+        let grid = Rect::new(bands.grid.x, bands.grid.y, bands.grid.width, grid_h);
+        let tabs = Rect::new(
+            bands.grid.x,
+            bands.grid.y + grid_h,
+            bands.grid.width,
+            tabs_h,
+        );
+        (grid, tabs)
     }
 
     /// The command palette's popup rect: centred, a fixed fraction of
@@ -390,6 +477,7 @@ impl CalcApp {
 
         self.view = View {
             grid: Some(grid),
+            tab_bar: Some(sheets::tab_bar(&self.session)),
             selection_label,
             active_input,
             active_text,
@@ -424,10 +512,18 @@ impl View {
             rect: bands.formula,
             tf: self.formula.clone(),
         });
+        let (grid_rect, tab_bar_rect) = CalcApp::carve_tab_strip(bands);
         if let Some(grid) = &self.grid {
             layout.push(Surface::CellGrid {
-                rect: bands.grid,
+                rect: grid_rect,
                 grid: grid.clone(),
+            });
+        }
+        if let Some(bar) = &self.tab_bar {
+            layout.push(Surface::TabBar {
+                rect: tab_bar_rect,
+                bar: bar.clone(),
+                hovered_close: None,
             });
         }
         layout.push(self.status_surface(bands.status));
@@ -592,6 +688,35 @@ impl AppLogic for CalcApp {
             self.refresh(backend);
             return Reaction::Redraw;
         }
+        // A click on the sheet-tabs strip switches sheets, resolved
+        // against the same `TabBar` `View::screen` just painted so the
+        // hit always matches what's on screen this frame. Guarded by
+        // "outside an active edit" like every other shortcut below, so a
+        // stray click there doesn't abandon an in-progress edit.
+        if !self.grid.is_editing()
+            && let UiEvent::MouseDown {
+                button: MouseButton::Left,
+                position,
+                ..
+            } = &event
+        {
+            let rect = Self::tab_bar_rect(backend);
+            if rect.contains(*position) {
+                if let Some(bar) = self.view.tab_bar.clone() {
+                    let local_x = position.x - rect.x;
+                    let local_y = position.y - rect.y;
+                    if let TabBarHit::Tab(i) = backend
+                        .resolve_tab_bar_layout(rect, &bar)
+                        .hit_test(local_x, local_y)
+                        && let Err(e) = self.activate_sheet(i)
+                    {
+                        self.error = Some(e.to_string());
+                    }
+                }
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+        }
         // `q`/Escape quit only outside an active edit — while editing, `q`
         // is a character to insert and Escape cancels the edit instead
         // (`CellGridController::handle` routes both to the edit buffer
@@ -633,6 +758,33 @@ impl AppLogic for CalcApp {
             };
             if let Some(command) = command {
                 if let Err(e) = self.execute(command, json!({})) {
+                    self.error = Some(e.to_string());
+                }
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+        }
+        // Ctrl+PageUp/PageDown (Cmd on macOS) switch sheets through
+        // `sheet.previous`/`sheet.next` — GridCraft's own catalog
+        // shortcuts for these ids (`gridcraft_engine::cmd::sheet`).
+        // Checked before `self.grid.handle` further down, whose own
+        // `PageUp`/`PageDown` arms page the grid regardless of
+        // modifiers; same "outside an active edit" guard as every other
+        // shortcut above.
+        if !self.grid.is_editing()
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+            && (modifiers.ctrl || modifiers.cmd)
+        {
+            type SheetSwitch = fn(&mut CalcApp) -> anyhow::Result<()>;
+            let switch: Option<SheetSwitch> = if matches!(key, Key::Named(NamedKey::PageUp)) {
+                Some(CalcApp::previous_sheet)
+            } else if matches!(key, Key::Named(NamedKey::PageDown)) {
+                Some(CalcApp::next_sheet)
+            } else {
+                None
+            };
+            if let Some(switch) = switch {
+                if let Err(e) = switch(self) {
                     self.error = Some(e.to_string());
                 }
                 self.refresh(backend);
