@@ -8,17 +8,15 @@
 
 #[cfg(target_os = "macos")]
 fn main() -> std::process::ExitCode {
-    let mut mcp = false;
-    let mut path = None;
-    for arg in std::env::args().skip(1) {
-        if arg == "--mcp" {
-            mcp = true;
-        } else {
-            path = Some(arg);
+    let args = match quadracalc_core::agent::parse_args(std::env::args().skip(1)) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!("quadracalc: {e}");
+            return std::process::ExitCode::FAILURE;
         }
-    }
+    };
 
-    let app = match quadracalc_core::CalcApp::new_for_path(path.as_deref()) {
+    let app = match quadracalc_core::CalcApp::new_for_path(args.path.as_deref()) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("quadracalc: {e}");
@@ -26,7 +24,7 @@ fn main() -> std::process::ExitCode {
         }
     };
 
-    if !mcp {
+    if !args.mcp {
         return quadraui::macos::run(app);
     }
 

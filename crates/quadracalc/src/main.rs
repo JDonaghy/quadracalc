@@ -10,19 +10,17 @@
 use std::time::Duration;
 
 fn main() -> anyhow::Result<()> {
-    let mut mcp = false;
-    let mut path = None;
-    for arg in std::env::args().skip(1) {
-        if arg == "--mcp" {
-            mcp = true;
-        } else {
-            path = Some(arg);
+    let args = match quadracalc_core::agent::parse_args(std::env::args().skip(1)) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!("quadracalc: {e}");
+            std::process::exit(2);
         }
-    }
+    };
 
-    let app = quadracalc_core::CalcApp::new_for_path(path.as_deref())?;
+    let app = quadracalc_core::CalcApp::new_for_path(args.path.as_deref())?;
 
-    if !mcp {
+    if !args.mcp {
         quadraui::tui::run(app)?;
         return Ok(());
     }
