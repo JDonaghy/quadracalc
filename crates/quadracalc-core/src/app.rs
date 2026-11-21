@@ -16,7 +16,7 @@
 //! and reads only the window [`CellGridController::layout`] reports is on
 //! screen, never the whole sheet.
 
-use gridcraft_engine::Session;
+use gridcraft_engine::{Session, UiRequest};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
     NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface, UiEvent,
@@ -39,6 +39,11 @@ pub struct CalcApp {
     /// Last engine error, shown in the status bar until the next action.
     error: Option<String>,
     view: View,
+    /// The last title `refresh` actually wrote through `backend.window()`
+    /// — skips the OSC 0/2 write (TUI) or native title-set call on every
+    /// frame when nothing changed, since `refresh` runs on every cursor
+    /// move, not just the `cell.set`/save calls that can change it.
+    last_title: Option<String>,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -72,6 +77,7 @@ impl CalcApp {
             grid,
             error: None,
             view: View::default(),
+            last_title: None,
         }
     }
 
@@ -91,6 +97,64 @@ impl CalcApp {
             app.set_cell(cell, input)?;
         }
         Ok(app)
+    }
+
+    /// `with_sample()` with no `path`; otherwise a blank workbook with
+    /// `path` opened into it through `file.open`. An open failure (a
+    /// missing file, a corrupt workbook) never panics or fails
+    /// construction — it lands in `self.error`, so the first `render`
+    /// reports it in the status bar exactly like a bad `cell.set` does.
+    pub fn new_for_path(path: Option<&str>) -> anyhow::Result<Self> {
+        let Some(path) = path else {
+            return Self::with_sample();
+        };
+        let mut app = Self::new();
+        if let Err(e) = app.open_path(path) {
+            app.error = Some(e.to_string());
+        }
+        Ok(app)
+    }
+
+    /// `file.open`: load `path` into the session, replacing whatever
+    /// `new()`/`with_sample()` seeded it with.
+    pub fn open_path(&mut self, path: &str) -> anyhow::Result<()> {
+        self.execute("file.open", json!({ "path": path }))?;
+        Ok(())
+    }
+
+    /// `file.save`: write the active workbook back to the path it was
+    /// opened/saved from. With no such path yet (a workbook that was
+    /// never opened from or saved to a file), the engine queues a
+    /// `saveAs` dialog request instead of erroring — this frontend has no
+    /// dialog UI to answer that with, so this turns it into a plain
+    /// `Err` instead of silently doing nothing.
+    pub fn save(&mut self) -> anyhow::Result<()> {
+        let before = self.session.ui_requests.len();
+        self.execute("file.save", json!({}))?;
+        let asked_for_a_path = self.session.ui_requests.get(before..).is_some_and(|new| {
+            new.iter()
+                .any(|r| matches!(r, UiRequest::Dialog(kind, _) if kind == "saveAs"))
+        });
+        self.session.ui_requests.truncate(before);
+        if asked_for_a_path {
+            anyhow::bail!("nothing to save to yet — this workbook was never opened from a file");
+        }
+        Ok(())
+    }
+
+    /// `file.saveAs`: write the active workbook to `path`, which becomes
+    /// its file (later plain `save()` calls write back here).
+    pub fn save_as(&mut self, path: &str) -> anyhow::Result<()> {
+        self.execute("file.saveAs", json!({ "path": path }))?;
+        Ok(())
+    }
+
+    /// Whether the active workbook has changes since it was opened or
+    /// last saved — what the window/terminal title's dirty marker shows.
+    pub fn is_dirty(&self) -> bool {
+        self.session
+            .doc()
+            .is_ok_and(gridcraft_engine::DocState::is_dirty)
     }
 
     /// Run one GridCraft command. The UI never changes the workbook any
@@ -173,11 +237,23 @@ impl CalcApp {
         }
     }
 
+    /// The window/terminal title: the workbook's display name plus a
+    /// trailing dirty marker when it has unsaved changes.
+    fn window_title(name: &str, dirty: bool) -> String {
+        if dirty {
+            format!("{name} •")
+        } else {
+            name.to_string()
+        }
+    }
+
     /// Re-read exactly the visible window from the engine and rebuild
     /// `self.view` — called from `setup` and every `handle`, which are the
     /// only places with a `backend` to resolve
-    /// `CellGridController::layout` against.
-    fn refresh(&mut self, backend: &dyn Backend) {
+    /// `CellGridController::layout` against. Also the one place that
+    /// retitles the window/terminal (`backend.window()`), since it is
+    /// the same "did a command just run" cue the rest of the view uses.
+    fn refresh(&mut self, backend: &mut dyn Backend) {
         let (row_height, col_width) = Self::cell_size(backend);
         self.grid.set_sizing(row_height, col_width);
         let rect = Self::grid_rect(backend);
@@ -218,6 +294,16 @@ impl CalcApp {
             active_text: self.cell_text(&a1),
             error: self.error.clone(),
         };
+
+        if let Ok(doc) = self.session.doc() {
+            let title = Self::window_title(&doc.display_title(), doc.is_dirty());
+            if self.last_title.as_deref() != Some(title.as_str()) {
+                if let Some(window) = backend.window() {
+                    let _ = window.set_title(&title);
+                }
+                self.last_title = Some(title);
+            }
+        }
     }
 }
 
@@ -310,6 +396,20 @@ impl AppLogic for CalcApp {
             && matches!(key, Key::Char('q') | Key::Named(NamedKey::Escape))
         {
             return Reaction::Exit;
+        }
+        // Ctrl+S (Cmd+S on macOS) saves — also only outside an active
+        // edit, so the shortcut never fights with typing a literal "s"
+        // into a cell.
+        if !self.grid.is_editing()
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+            && (modifiers.ctrl || modifiers.cmd)
+            && matches!(key, Key::Char('s') | Key::Char('S'))
+        {
+            if let Err(e) = self.save() {
+                self.error = Some(e.to_string());
+            }
+            self.refresh(backend);
+            return Reaction::Redraw;
         }
         // `CellGridController::handle` has no arm for `WindowResized` (it
         // owns no viewport-size state of its own, only scroll/cursor), so
@@ -477,5 +577,58 @@ mod tests {
     fn cell_size_is_tui_shaped_below_one_chrome_line_and_pixel_scaled_above_it() {
         assert_eq!(CalcApp::resolve_cell_size(1.0, 1.0), (1.0, 8.0));
         assert_eq!(CalcApp::resolve_cell_size(18.0, 7.0), (18.0, 70.0));
+    }
+
+    #[test]
+    fn window_title_adds_a_dirty_marker_only_when_dirty() {
+        assert_eq!(CalcApp::window_title("Book1", false), "Book1");
+        assert_eq!(CalcApp::window_title("Book1", true), "Book1 •");
+    }
+
+    #[test]
+    fn editing_a_cell_marks_the_workbook_dirty_until_it_is_saved() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "quadracalc-dirty-{}-{}.xlsx",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = path.to_str().unwrap();
+
+        let mut app = CalcApp::new();
+        app.save_as(path).unwrap();
+        assert!(!app.is_dirty(), "a freshly saved workbook should be clean");
+
+        app.set_cell("A1", "hello").unwrap();
+        assert!(app.is_dirty(), "cell.set should mark the workbook dirty");
+
+        app.save().unwrap();
+        assert!(!app.is_dirty(), "save() should clear the dirty marker");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_without_a_file_errors_instead_of_silently_doing_nothing() {
+        let mut app = CalcApp::new();
+        assert!(app.save().is_err());
+    }
+
+    #[test]
+    fn new_for_path_reports_a_bad_path_in_the_error_field_without_panicking() {
+        let app = CalcApp::new_for_path(Some("/no/such/workbook.xlsx")).unwrap();
+        assert!(app.view.error.is_none(), "no render has run yet");
+        // `open_path` itself failed, so the error lives on `self.error`
+        // before the first `refresh` ever copies it into `view.error`.
+        assert!(app.error.is_some());
+    }
+
+    #[test]
+    fn new_for_path_with_no_path_keeps_the_sample_sheet() {
+        let mut app = CalcApp::new_for_path(None).unwrap();
+        assert_eq!(app.cell_text("A1"), "Item");
     }
 }
