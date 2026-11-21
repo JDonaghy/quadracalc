@@ -74,12 +74,14 @@ pub(crate) fn paste(app: &mut CalcApp, anchor: &str, text: &str) -> anyhow::Resu
     Ok(())
 }
 
-/// Edit > Paste from the menu bar: unlike Ctrl+V (see the module doc),
-/// there's no anchor/text quadraui's runtime has already resolved, so
-/// this reads the system clipboard directly and pastes at the cursor
-/// cell. `crate::menu` force-enables its "Paste" item for exactly this
-/// reason — `palette::entries`'s generic classification has no
-/// `Backend` to read the clipboard from and disables it.
+/// Edit > Paste from the menu bar or the command palette: unlike Ctrl+V
+/// (see the module doc), there's no anchor/text quadraui's runtime has
+/// already resolved, so this reads the system clipboard directly and
+/// pastes at the current selection's top-left corner — the same anchor
+/// Ctrl+V's own already-resolved `PasteRequested` event uses, not the
+/// raw cursor (see [`CalcApp::selection_anchor`]'s own doc for why those
+/// two can differ). `palette::classify` marks `edit.paste` enabled
+/// unconditionally for exactly this reason — see that module's own doc.
 pub(crate) fn paste_from_system(
     app: &mut CalcApp,
     backend: &mut dyn Backend,
@@ -87,7 +89,7 @@ pub(crate) fn paste_from_system(
     let Some(text) = backend.services().clipboard().read_text() else {
         anyhow::bail!("system clipboard is empty");
     };
-    let anchor = app.cursor().a1();
+    let anchor = app.selection_anchor().a1();
     paste(app, &anchor, &text)
 }
 

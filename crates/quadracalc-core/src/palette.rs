@@ -16,10 +16,13 @@
 //! is shown disabled with a short reason, same for an id the catalog
 //! lists but no command implements (`catalog.rs`'s own doc: "a catalog
 //! entry counts as done when a command with its id is registered").
-//! The one exception is an id `crate::format_picker::has_picker` knows:
-//! it's shown enabled, and running it (`Outcome::Pick` instead of
+//! Two exceptions: an id `crate::format_picker::has_picker` knows is
+//! shown enabled, and running it (`Outcome::Pick` instead of
 //! `Outcome::Run`) opens that module's dialog host to collect the
-//! parameter instead of running the command directly.
+//! parameter instead of running the command directly; `edit.paste` is
+//! shown enabled too, and `app.rs`'s own `Outcome::Run` dispatch
+//! special-cases that one id to `clipboard::paste_from_system` instead
+//! of a generic `execute`.
 
 use gridcraft_engine::{Session, catalog::CATALOG, find_command};
 use quadraui::{
@@ -89,6 +92,17 @@ fn classify(session: &Session, id: &str) -> (bool, Option<String>) {
     // parameter through its own dialog host, so a required field here
     // doesn't disable the row the way `unsuppliable_params` below would.
     if crate::format_picker::has_picker(id) {
+        return (true, None);
+    }
+    // Same shape as the picker check above: `edit.paste` needs a
+    // `text`/`at` this function's `(session, id)` signature has no
+    // `Backend` to fill in, but `app.rs`'s own dispatch does (both the
+    // palette's `PaletteOutcome::Run` arm and the menu's `Activated`
+    // arm special-case this id to `clipboard::paste_from_system`
+    // instead of a generic `execute(id, {})`), so it isn't actually
+    // unsuppliable the way `unsuppliable_params` below would classify
+    // it.
+    if id == "edit.paste" {
         return (true, None);
     }
     if let Some(fields) = unsuppliable_params(spec.params) {
