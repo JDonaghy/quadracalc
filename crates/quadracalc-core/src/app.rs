@@ -3,48 +3,58 @@
 //!
 //! Reading the engine takes `&mut Session` (everything goes through
 //! `Session::execute`), but `AppLogic::render` only gets `&self`. So the app
-//! refreshes a [`View`] — the visible block of cell texts plus the active
-//! cell's details — after every command, and `render` paints from it.
+//! refreshes a [`View`] — the visible block of cell texts (already built
+//! into a quadraui [`CellGrid`]) plus the active cell's details — whenever
+//! the viewport or the cursor could have moved (`setup` and every
+//! `handle`), and `render` only reads [`CalcApp::view`]. Painting goes
+//! through `ScreenLayout`, quadraui's canonical path, which is also what
+//! makes the screen visible to the accessibility tree and agents.
 //!
-//! The grid is a `DataTable` stand-in until quadraui's CellGrid primitive
-//! (quadraui#2732) lands; swapping it in changes only [`View::grid_surface`].
-//! Painting goes through `ScreenLayout`, quadraui's canonical path, which is
-//! also what makes the screen visible to the accessibility tree and agents.
+//! The grid itself is a [`CellGridController`]-driven [`CellGrid`] —
+//! quadraui's spreadsheet primitive (quadraui#2732). The controller owns
+//! cursor/selection/scroll/frozen-pane state; this app owns cell content
+//! and reads only the window [`CellGridController::layout`] reports is on
+//! screen, never the whole sheet.
 
 use gridcraft_engine::Session;
 use quadraui::{
-    AppLogic, Backend, Color, Column, ColumnAlign, ColumnWidth, DataRow, DataTable, Key, NamedKey,
-    Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, StyledText, Surface, UiEvent,
-    WidgetId,
+    AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
+    NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface, UiEvent,
 };
 use serde_json::{Value, json};
 
-use crate::address::{Address, column_label};
+use crate::address::Address;
 
-/// Columns shown by the stand-in grid.
-const VISIBLE_COLS: u32 = 8;
-/// Rows cached per refresh; the painter shows as many as fit.
-const CACHED_ROWS: u32 = 60;
+/// Rows in the demo sheet — far more than any terminal or window shows at
+/// once, so scrolling to a distant row exercises `CellGrid`'s own
+/// two-axis virtualisation rather than anything this app does.
+const ROW_COUNT: usize = 10_000;
+/// Columns in the demo sheet, likewise wider than any viewport.
+const COL_COUNT: usize = 50;
 
 pub struct CalcApp {
     session: Session,
-    cursor: Address,
-    top_row: u32,
-    /// Rows that fit on screen, learned from the backend in `handle`.
-    page_rows: u32,
+    grid: CellGridController,
     /// Last engine error, shown in the status bar until the next action.
     error: Option<String>,
     view: View,
 }
 
-/// Everything `render` needs, read from the engine after each command.
+/// Everything `render` needs, rebuilt after every command or cursor move.
 #[derive(Debug, Clone, Default)]
 pub struct View {
-    pub top_row: u32,
-    pub cursor: Address,
-    /// `cells[r][c]`: displayed text, rows from `top_row`, columns from A.
-    pub cells: Vec<Vec<String>>,
+    /// The fully-built grid for this frame — geometry plus the windowed
+    /// cell text the engine supplied for exactly the rows/columns
+    /// `CellGridController::layout` reported as visible. `None` only
+    /// before the first `setup`/`handle` call ever runs.
+    pub grid: Option<CellGrid>,
+    /// The cursor's address, or `top:bottom` range notation for a
+    /// multi-cell selection.
+    pub selection_label: String,
+    /// What the user typed into the cursor cell: the formula for a
+    /// formula cell.
     pub active_input: String,
+    /// The engine's displayed text for the cursor cell.
     pub active_text: String,
     pub error: Option<String>,
 }
@@ -54,16 +64,14 @@ impl CalcApp {
     pub fn new() -> Self {
         let mut session = Session::new();
         session.new_workbook();
-        let mut app = Self {
+        let mut grid = CellGridController::new("quadracalc-grid");
+        grid.set_dimensions(ROW_COUNT, COL_COUNT);
+        Self {
             session,
-            cursor: Address::default(),
-            top_row: 0,
-            page_rows: 20,
+            grid,
             error: None,
             view: View::default(),
-        };
-        app.refresh();
-        app
+        }
     }
 
     /// A workbook with a small sample, so a first launch shows a live formula.
@@ -84,15 +92,16 @@ impl CalcApp {
         Ok(app)
     }
 
-    /// Run one GridCraft command, then refresh the view. The UI never changes
-    /// the workbook any other way.
+    /// Run one GridCraft command. The UI never changes the workbook any
+    /// other way. Callers that need the view refreshed afterwards (every
+    /// production caller) go through `handle`/`setup`'s own `refresh`
+    /// instead, since only those have a `backend` to resolve the visible
+    /// window with; this is also used directly by tests that just want the
+    /// engine's own result and check `cell_text`/`cell_input` themselves.
     pub fn execute(&mut self, id: &str, params: Value) -> anyhow::Result<Value> {
-        let result = self
-            .session
+        self.session
             .execute(id, params)
-            .map_err(|e| anyhow::anyhow!("{id}: {e}"));
-        self.refresh();
-        result
+            .map_err(|e| anyhow::anyhow!("{id}: {e}"))
     }
 
     /// `cell.set`: enter text, a number or a formula into one cell.
@@ -120,41 +129,61 @@ impl CalcApp {
     }
 
     pub fn cursor(&self) -> Address {
-        self.cursor
+        let (row, col) = self.grid.cursor();
+        Address::new(row as u32, col as u32)
     }
 
     pub fn view(&self) -> &View {
         &self.view
     }
 
-    fn move_cursor(&mut self, d_row: i64, d_col: i64) {
-        let row = (self.cursor.row as i64 + d_row).max(0) as u32;
-        let col = (self.cursor.col as i64 + d_col).clamp(0, VISIBLE_COLS as i64 - 1) as u32;
-        self.cursor = Address::new(row, col);
-        let page = self.page_rows.max(1);
-        if row < self.top_row {
-            self.top_row = row;
-        } else if row >= self.top_row + page {
-            self.top_row = row + 1 - page;
-        }
-        self.refresh();
+    /// The grid body's rect — the viewport minus the status bar.
+    fn grid_rect(backend: &dyn Backend) -> Rect {
+        let vp = backend.viewport();
+        let lh = backend.line_height().max(1.0);
+        let bar_h = if lh > 1.5 { lh * 1.5 } else { lh };
+        Rect::new(0.0, 0.0, vp.width, (vp.height - bar_h).max(0.0))
     }
 
-    /// Re-read the visible block and the active cell from the engine.
-    fn refresh(&mut self) {
-        let top = self.top_row;
-        let cells = (top..top + CACHED_ROWS)
+    /// Re-read exactly the visible window from the engine and rebuild
+    /// `self.view` — called from `setup` and every `handle`, which are the
+    /// only places with a `backend` to resolve
+    /// `CellGridController::layout` against.
+    fn refresh(&mut self, backend: &dyn Backend) {
+        let rect = Self::grid_rect(backend);
+        let layout = self.grid.layout(backend, rect).layout;
+        let cells: Vec<Vec<Cell>> = layout
+            .rows
+            .iter()
             .map(|r| {
-                (0..VISIBLE_COLS)
-                    .map(|c| self.cell_text(&Address::new(r, c).a1()))
+                layout
+                    .cols
+                    .iter()
+                    .map(|c| {
+                        Cell::plain(
+                            self.cell_text(&Address::new(r.index as u32, c.index as u32).a1()),
+                        )
+                    })
                     .collect()
             })
             .collect();
-        let a1 = self.cursor.a1();
+        let grid = self.grid.grid(cells);
+
+        let a1 = self.cursor().a1();
+        let (top, left, bottom, right) = self.grid.selection_bounds();
+        let selection_label = if top == bottom && left == right {
+            a1.clone()
+        } else {
+            format!(
+                "{}:{}",
+                Address::new(top as u32, left as u32).a1(),
+                Address::new(bottom as u32, right as u32).a1()
+            )
+        };
+
         self.view = View {
-            top_row: top,
-            cursor: self.cursor,
-            cells,
+            grid: Some(grid),
+            selection_label,
             active_input: self.cell_input(&a1),
             active_text: self.cell_text(&a1),
             error: self.error.clone(),
@@ -170,74 +199,17 @@ impl Default for CalcApp {
 
 impl View {
     /// The whole screen as `ScreenLayout` surfaces, back to front.
-    pub fn screen(&self, width: f32, height: f32, line_height: f32) -> ScreenLayout {
-        let bar_h = if line_height > 1.5 {
-            line_height * 1.5
-        } else {
-            line_height
-        };
-        let grid_rect = Rect::new(0.0, 0.0, width, (height - bar_h).max(0.0));
+    fn screen(&self, width: f32, height: f32, bar_h: f32) -> ScreenLayout {
         let mut layout = ScreenLayout::new();
-        layout.push(self.grid_surface(grid_rect));
+        let grid_rect = Rect::new(0.0, 0.0, width, (height - bar_h).max(0.0));
+        if let Some(grid) = &self.grid {
+            layout.push(Surface::CellGrid {
+                rect: grid_rect,
+                grid: grid.clone(),
+            });
+        }
         layout.push(self.status_surface(Rect::new(0.0, grid_rect.height, width, bar_h)));
         layout
-    }
-
-    /// The stand-in grid: row numbers plus columns A…H, cursor row selected.
-    fn grid_surface(&self, rect: Rect) -> Surface {
-        let mut columns = vec![Column {
-            title: String::new(),
-            width: ColumnWidth::FixedCells(5.0),
-            align: ColumnAlign::Right,
-        }];
-        columns.extend((0..VISIBLE_COLS).map(|c| Column {
-            title: column_label(c),
-            width: ColumnWidth::Flex(1.0),
-            align: ColumnAlign::Left,
-        }));
-
-        let rows = self
-            .cells
-            .iter()
-            .enumerate()
-            .map(|(i, texts)| {
-                let r = self.top_row + i as u32;
-                let mut cells = vec![StyledText::plain((r + 1).to_string())];
-                for (c, text) in texts.iter().enumerate() {
-                    let here = Address::new(r, c as u32) == self.cursor;
-                    cells.push(if here {
-                        StyledText::colored(format!("[{text}]"), Color::rgb(255, 210, 90))
-                    } else {
-                        StyledText::plain(text.clone())
-                    });
-                }
-                DataRow {
-                    cells,
-                    decoration: Default::default(),
-                }
-            })
-            .collect();
-
-        let table = DataTable {
-            id: WidgetId::new("sheet"),
-            columns,
-            rows,
-            selected_idx: Some((self.cursor.row - self.top_row) as usize),
-            scroll_offset: 0,
-            sort: None,
-            has_focus: true,
-            show_scrollbar: false,
-            min_total_width: None,
-            h_scroll: 0.0,
-            column_overrides: Default::default(),
-            footer: None,
-            bordered: false,
-        };
-        Surface::DataTable {
-            rect,
-            table,
-            hovered: None,
-        }
     }
 
     fn status_surface(&self, rect: Rect) -> Surface {
@@ -248,10 +220,10 @@ impl View {
         };
         let bar_bg = Color::rgb(33, 66, 110);
         let bar = StatusBar {
-            id: WidgetId::new("status"),
+            id: quadraui::WidgetId::new("status"),
             left_segments: vec![
                 StatusBarSegment {
-                    text: format!(" {} ", self.cursor.a1()),
+                    text: format!(" {} ", self.selection_label),
                     fg: Color::rgb(255, 255, 255),
                     bg: Color::rgb(20, 45, 80),
                     bold: true,
@@ -285,37 +257,98 @@ impl View {
 impl AppLogic for CalcApp {
     type AreaId = ();
 
+    fn setup(&mut self, backend: &mut dyn Backend) {
+        self.refresh(backend);
+    }
+
     fn render(&self, backend: &mut dyn Backend, _area: ()) {
         let vp = backend.viewport();
-        let layout = self.view.screen(vp.width, vp.height, backend.line_height());
+        let lh = backend.line_height().max(1.0);
+        let bar_h = if lh > 1.5 { lh * 1.5 } else { lh };
+        let layout = self.view.screen(vp.width, vp.height, bar_h);
         let _ = layout.draw(backend);
     }
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {
-        let UiEvent::KeyPressed { key, .. } = event else {
-            return Reaction::Continue;
-        };
-        let lh = backend.line_height().max(1.0);
-        let bar_h = if lh > 1.5 { lh * 1.5 } else { lh };
-        self.page_rows = (((backend.viewport().height - bar_h) / lh) as u32)
-            .saturating_sub(1)
-            .max(1);
         self.error = None;
-        match key {
-            Key::Char('q') | Key::Named(NamedKey::Escape) => return Reaction::Exit,
-            Key::Named(NamedKey::Up) => self.move_cursor(-1, 0),
-            Key::Named(NamedKey::Down) | Key::Named(NamedKey::Enter) => self.move_cursor(1, 0),
-            Key::Named(NamedKey::Left) => self.move_cursor(0, -1),
-            Key::Named(NamedKey::Right) | Key::Named(NamedKey::Tab) => self.move_cursor(0, 1),
-            _ => return Reaction::Continue,
+        // `q`/Escape quit only outside an active edit — while editing, `q`
+        // is a character to insert and Escape cancels the edit instead
+        // (`CellGridController::handle` routes both to the edit buffer
+        // when `is_editing`, same as quadraui's own `cell_grid_demo`).
+        if !self.grid.is_editing()
+            && let UiEvent::KeyPressed { key, .. } = &event
+            && matches!(key, Key::Char('q') | Key::Named(NamedKey::Escape))
+        {
+            return Reaction::Exit;
         }
-        Reaction::Redraw
+        let rect = Self::grid_rect(backend);
+        let event = self.grid.handle(&event, backend, rect);
+        let reaction = self.apply_controller_event(event);
+        if matches!(reaction, Reaction::Redraw) {
+            self.refresh(backend);
+        }
+        reaction
+    }
+}
+
+impl CalcApp {
+    /// Apply one [`CellGridControllerEvent`] from `handle`'s own
+    /// `CellGridController::handle` call. The controller owns no cell
+    /// content (see its module doc), so a request to edit or commit a
+    /// cell is this app's cue to read/write that cell through the engine.
+    fn apply_controller_event(&mut self, event: CellGridControllerEvent) -> Reaction {
+        match event {
+            CellGridControllerEvent::Ignored => Reaction::Continue,
+            // F2: seed the inline editor with this cell's current raw
+            // input — the controller has no cell content to seed it with
+            // itself.
+            CellGridControllerEvent::CellEditRequested { row, col } => {
+                let a1 = Address::new(row as u32, col as u32).a1();
+                let text = self.cell_input(&a1);
+                self.grid.start_editing(text);
+                Reaction::Redraw
+            }
+            // Enter/Tab/an arrow key committed the in-progress edit — hand
+            // the raw text to the engine's own `cell.set`, the one way the
+            // UI ever changes a workbook.
+            CellGridControllerEvent::CellEditCommitted { row, col, text } => {
+                let a1 = Address::new(row as u32, col as u32).a1();
+                if let Err(e) = self.set_cell(&a1, &text) {
+                    self.error = Some(e.to_string());
+                }
+                Reaction::Redraw
+            }
+            _ => Reaction::Redraw,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quadraui::tui::TuiBackend;
+    use quadraui::{Modifiers, Viewport};
+
+    fn backend() -> TuiBackend {
+        let mut b = TuiBackend::new();
+        b.begin_frame(Viewport::new(40.0, 20.0, 1.0));
+        b
+    }
+
+    fn key(named: NamedKey, modifiers: Modifiers) -> UiEvent {
+        UiEvent::KeyPressed {
+            key: Key::Named(named),
+            modifiers,
+            repeat: false,
+        }
+    }
+
+    fn shift() -> Modifiers {
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn engine_recalculates_through_the_command_surface() {
@@ -332,20 +365,47 @@ mod tests {
     }
 
     #[test]
-    fn view_follows_commands_and_cursor() {
-        let mut app = CalcApp::with_sample().unwrap();
-        assert_eq!(app.view().cells[0][0], "Item");
-        app.move_cursor(3, 1);
-        assert_eq!(app.view().cursor, Address::new(3, 1));
-        assert_eq!(app.view().active_input, "=SUM(B2:B3)");
+    fn cursor_starts_at_the_origin() {
+        let app = CalcApp::new();
+        assert_eq!(app.cursor(), Address::new(0, 0));
     }
 
     #[test]
-    fn cursor_stays_in_bounds() {
+    fn arrow_keys_move_the_cursor_and_refresh_the_view() {
+        let mut app = CalcApp::with_sample().unwrap();
+        let mut b = backend();
+        app.setup(&mut b);
+        app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
+        app.handle(key(NamedKey::Right, Modifiers::default()), &mut b);
+        assert_eq!(app.cursor(), Address::new(1, 1));
+        assert_eq!(app.view().selection_label, "B2");
+        assert_eq!(app.view().active_text, "$1,200.50");
+    }
+
+    #[test]
+    fn cursor_clamps_at_the_sheet_edge() {
         let mut app = CalcApp::new();
-        app.move_cursor(-5, -5);
+        let mut b = backend();
+        app.setup(&mut b);
+        app.handle(key(NamedKey::Up, Modifiers::default()), &mut b);
+        app.handle(key(NamedKey::Left, Modifiers::default()), &mut b);
         assert_eq!(app.cursor(), Address::new(0, 0));
-        app.move_cursor(3, 100);
-        assert_eq!(app.cursor(), Address::new(3, VISIBLE_COLS - 1));
+    }
+
+    #[test]
+    fn shift_arrow_extends_the_selection() {
+        let mut app = CalcApp::new();
+        let mut b = backend();
+        app.setup(&mut b);
+        app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
+        app.handle(key(NamedKey::Right, shift()), &mut b);
+        app.handle(key(NamedKey::Right, shift()), &mut b);
+        assert_eq!(app.cursor(), Address::new(1, 2));
+        assert_eq!(app.grid.selection_bounds(), (1, 0, 1, 2));
+        assert_eq!(app.view().selection_label, "A2:C2");
+
+        // A plain arrow afterwards collapses the selection back to one cell.
+        app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
+        assert_eq!(app.grid.selection_anchor(), None);
     }
 }
