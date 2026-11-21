@@ -27,6 +27,7 @@ use serde_json::{Value, json};
 
 use crate::address::Address;
 use crate::agent;
+use crate::clipboard;
 use crate::formula_bar::{self, Bands};
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
 
@@ -247,7 +248,7 @@ impl CalcApp {
     /// the palette can run, and before snapshotting the catalog's own
     /// classification, since a precondition (`spec.info(session)`) can
     /// also depend on the selection.
-    fn sync_selection(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn sync_selection(&mut self) -> anyhow::Result<()> {
         let a1 = self.cursor().a1();
         let (top, left, bottom, right) = self.grid.selection_bounds();
         let range = if top == bottom && left == right {
@@ -632,6 +633,38 @@ impl AppLogic for CalcApp {
             };
             if let Some(command) = command {
                 if let Err(e) = self.execute(command, json!({})) {
+                    self.error = Some(e.to_string());
+                }
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+        }
+        // Ctrl+C/X/V (Cmd on macOS) copy/cut/paste the selection through
+        // `crate::clipboard`'s bridge over `edit.copy`/`edit.cut`/
+        // `edit.paste`; Ctrl+D/Ctrl+R fill the selection down/right
+        // through `edit.fillDown`/`edit.fillRight`. Same "outside an
+        // active edit" guard as every other shortcut above, so none of
+        // these fight with typing a literal c/x/v/d/r into a cell.
+        if !self.grid.is_editing()
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+            && (modifiers.ctrl || modifiers.cmd)
+        {
+            type Action = fn(&mut CalcApp, &mut dyn Backend) -> anyhow::Result<()>;
+            let action: Option<Action> = if matches!(key, Key::Char('c') | Key::Char('C')) {
+                Some(clipboard::copy)
+            } else if matches!(key, Key::Char('x') | Key::Char('X')) {
+                Some(clipboard::cut)
+            } else if matches!(key, Key::Char('v') | Key::Char('V')) {
+                Some(clipboard::paste)
+            } else if matches!(key, Key::Char('d') | Key::Char('D')) {
+                Some(clipboard::fill_down)
+            } else if matches!(key, Key::Char('r') | Key::Char('R')) {
+                Some(clipboard::fill_right)
+            } else {
+                None
+            };
+            if let Some(action) = action {
+                if let Err(e) = action(self, backend) {
                     self.error = Some(e.to_string());
                 }
                 self.refresh(backend);

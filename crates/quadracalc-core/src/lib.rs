@@ -10,6 +10,7 @@
 mod address;
 pub mod agent;
 mod app;
+mod clipboard;
 mod formula_bar;
 pub mod palette;
 
