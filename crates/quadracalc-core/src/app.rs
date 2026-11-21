@@ -16,13 +16,14 @@
 //! and reads only the window [`CellGridController::layout`] reports is on
 //! screen, never the whole sheet.
 
+use gridcraft_engine::catalog::CATALOG;
 use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Chart, Color,
-    Key, ListViewHit, Modifiers, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout,
-    SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent,
-    WidgetId,
+    Key, ListViewHit, MenuEvent, MenuSystem, Modifiers, MouseButton, NamedKey, Point, Reaction,
+    Rect, ScreenLayout, SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit,
+    TextField, UiEvent, WidgetId, resolve_bar_height,
 };
 use serde_json::{Value, json};
 
@@ -30,9 +31,10 @@ use crate::address::Address;
 use crate::agent;
 use crate::chart_view;
 use crate::clipboard;
-use crate::format_picker::{FormatPicker, PickerOutcome};
+use crate::format_picker::{self, FormatPicker, PickerOutcome};
 use crate::formula_bar::{self, Bands};
 use crate::function_picker::{self, FunctionPicker, Outcome as FunctionPickerOutcome};
+use crate::menu;
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
 use crate::sheets;
 use crate::sidebar::{self, Sidebar};
@@ -107,6 +109,12 @@ pub struct CalcApp {
     /// The right-hand Name Manager sidebar's open/selected state — see
     /// `crate::sidebar`'s module doc. Closed by default.
     sidebar: Sidebar,
+    /// The classic menu bar — `quadraui`'s `MenuSystem` compose helper
+    /// owns the open/close, keyboard-navigation and modal-stack state;
+    /// `crate::menu::menus` rebuilds its `MenuDef`s from the engine's
+    /// own command catalog every `refresh`, so e.g. "Undo" greys out
+    /// the moment there's nothing left to undo.
+    menu_system: MenuSystem,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -162,6 +170,7 @@ impl CalcApp {
         session.new_workbook();
         let mut grid = CellGridController::new("quadracalc-grid");
         grid.set_dimensions(ROW_COUNT, COL_COUNT);
+        let menu_system = MenuSystem::new(menu::menus(&session));
         Self {
             session,
             grid,
@@ -177,6 +186,7 @@ impl CalcApp {
             sheet_cursors: sheets::SheetCursors::default(),
             tab_scroll: 0,
             sidebar: Sidebar::default(),
+            menu_system,
         }
     }
 
@@ -461,15 +471,55 @@ impl CalcApp {
         &self.view
     }
 
+    /// The menu bar's own rect — the viewport's top row, sized by
+    /// `resolve_bar_height` (the same metric `quadraui`'s own
+    /// `MenuSystem` example uses: a fixed in-canvas height on a pixel
+    /// backend, one cell on TUI).
+    fn menu_bar_rect(backend: &dyn Backend) -> Rect {
+        let vp = backend.viewport();
+        let h = resolve_bar_height(backend.chrome_line_height()).min(vp.height);
+        Rect::new(0.0, 0.0, vp.width, h)
+    }
+
+    /// Recovers the `&'static str` [`CATALOG`] holds for `id`, since a
+    /// menu click only ever hands back a borrowed `&str` (`WidgetId::
+    /// as_str`), but [`FormatPicker::open`] wants the same `'static`
+    /// lifetime [`crate::palette::Entry::id`] already carries for the
+    /// palette's own `PaletteOutcome::Pick` path.
+    fn catalog_id(id: &str) -> Option<&'static str> {
+        CATALOG
+            .iter()
+            .find(|&&(cid, ..)| cid == id)
+            .map(|&(cid, ..)| cid)
+    }
+
     /// This frame's [`Bands`] — formula bar, grid body, status bar —
-    /// resolved from `backend`'s own viewport/line-height. Called
+    /// resolved from `backend`'s own viewport/line-height, offset below
+    /// [`Self::menu_bar_rect`] (this app's own fourth chrome row;
+    /// `formula_bar::bands` only knows about the other two). Called
     /// identically by `render` (to paint) and `handle` (to hit-test and
     /// to size the grid controller's own layout), so the two can never
     /// disagree on where each band sits.
     fn bands(backend: &dyn Backend) -> Bands {
         let vp = backend.viewport();
         let lh = backend.line_height().max(1.0);
-        formula_bar::bands(vp.width, vp.height, lh)
+        let menu_h = Self::menu_bar_rect(backend).height;
+        let b = formula_bar::bands(vp.width, (vp.height - menu_h).max(0.0), lh);
+        Bands {
+            formula: Rect::new(
+                b.formula.x,
+                b.formula.y + menu_h,
+                b.formula.width,
+                b.formula.height,
+            ),
+            grid: Rect::new(b.grid.x, b.grid.y + menu_h, b.grid.width, b.grid.height),
+            status: Rect::new(
+                b.status.x,
+                b.status.y + menu_h,
+                b.status.width,
+                b.status.height,
+            ),
+        }
     }
 
     /// The grid body's rect — the viewport minus the formula bar, the
@@ -736,6 +786,13 @@ impl CalcApp {
         // engine state, and `chart_view::charts` isn't cheap enough (one
         // `sheet.read` per series) to pay for twice a frame.
         let charts = std::mem::take(&mut self.view.charts);
+
+        // Re-classify against the engine's current state — e.g. "Undo"
+        // greys out the instant there's nothing left to undo. Cheap
+        // enough to rebuild every refresh (same cost the palette already
+        // pays every time it opens) rather than tracking what changed.
+        self.menu_system.set_menus(menu::menus(&self.session));
+
         self.view = View {
             grid: Some(grid),
             tab_bar: Some(tab_bar),
@@ -975,6 +1032,14 @@ impl AppLogic for CalcApp {
             });
         }
         let _ = layout.draw(backend);
+        // Not a `ScreenLayout` surface: `MenuSystem::render` paints
+        // straight through `Backend::draw_menu_bar_with_state`/
+        // `draw_context_menu`, the same compose-helper shape
+        // `quadraui`'s own `MenuBarApp` example uses. Painted last, same
+        // "topmost overlay" reasoning as the palette above — an open
+        // dropdown must sit over the grid/status bar it's anchored above.
+        let menu_bar_rect = Self::menu_bar_rect(backend);
+        self.menu_system.render(backend, menu_bar_rect);
     }
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {
@@ -1093,6 +1158,60 @@ impl AppLogic for CalcApp {
                 }
                 FunctionPickerOutcome::Ignored => Reaction::Continue,
             };
+        }
+        // The menu bar takes priority over everything below — Alt+key
+        // mnemonics and in-dropdown arrow/Enter navigation must work no
+        // matter what else is focused, the same precedence `quadraui`'s
+        // own `MenuSystem` example gives it. While a dropdown is open
+        // this also swallows every mouse event, the same modal
+        // interception the palette above gives itself; `Ignored` (the
+        // overwhelming majority of events — typing into a cell, grid
+        // navigation) falls through to everything below unchanged.
+        let menu_bar_rect = Self::menu_bar_rect(backend);
+        match self.menu_system.handle(&event, backend, menu_bar_rect) {
+            MenuEvent::Activated(id) if id.as_str() == menu::QUIT => return Reaction::Exit,
+            MenuEvent::Activated(id) => {
+                let id_str = id.as_str();
+                // Same "open a picker instead of running it" branch the
+                // palette's own `PaletteOutcome::Pick` uses — a menu
+                // click on Font/Font Size/Fill Color/Font Color/Borders/
+                // Draw Border/Number Format needs the same parameter
+                // dialog, just reached from the menu instead of the
+                // palette. `catalog_id` recovers the `&'static str` the
+                // catalog's own id table holds, since `WidgetId` only
+                // ever gives back a borrowed `&str` and `FormatPicker::
+                // open` wants the former.
+                if format_picker::has_picker(id_str) {
+                    if let Some(cid) = Self::catalog_id(id_str) {
+                        self.format_picker = FormatPicker::open(cid);
+                    }
+                    self.refresh(backend);
+                    return Reaction::Redraw;
+                }
+                // `sync_selection` before running a catalog command
+                // against no explicit range, same as the palette run
+                // above — except "Paste", which needs the system
+                // clipboard a generic `execute(id, {})` can't reach; see
+                // `menu::tab_items`'s and `clipboard::paste_from_system`'s
+                // own docs for why that one id is special-cased here.
+                let result = if id_str == "edit.paste" {
+                    clipboard::paste_from_system(self, backend)
+                } else {
+                    self.sync_selection()
+                        .and_then(|()| self.execute(id_str, json!({})))
+                        .map(|_| ())
+                };
+                if let Err(e) = result {
+                    self.error = Some(e.to_string());
+                }
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+            MenuEvent::StateChanged | MenuEvent::Consumed => {
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+            _ => {}
         }
         // Ctrl+Shift+P (Cmd+Shift+P on macOS), or a bare `:` on a
         // TUI-shaped backend, opens the palette — outside an active
