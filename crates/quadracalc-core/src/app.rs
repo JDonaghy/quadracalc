@@ -19,12 +19,13 @@
 use gridcraft_engine::{Session, UiRequest};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
-    NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface, UiEvent,
-    WidgetId,
+    MouseButton, NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface,
+    TextField, UiEvent, WidgetId,
 };
 use serde_json::{Value, json};
 
 use crate::address::Address;
+use crate::formula_bar::{self, Bands};
 
 /// Rows in the demo sheet — far more than any terminal or window shows at
 /// once, so scrolling to a distant row exercises `CellGrid`'s own
@@ -44,6 +45,13 @@ pub struct CalcApp {
     /// frame when nothing changed, since `refresh` runs on every cursor
     /// move, not just the `cell.set`/save calls that can change it.
     last_title: Option<String>,
+    /// Whether the formula bar — rather than the grid's own in-cell
+    /// editor — currently owns the in-progress edit's caret. Always
+    /// `false` when no edit is active; set by a click on the formula
+    /// bar, cleared the moment that edit commits or cancels (from
+    /// either the bar or the grid), since both end the one shared edit
+    /// `CellGridController` tracks (see its module doc).
+    formula_focused: bool,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -62,6 +70,10 @@ pub struct View {
     pub active_input: String,
     /// The engine's displayed text for the cursor cell.
     pub active_text: String,
+    /// This frame's formula bar — mirrors `active_input` when no edit is
+    /// in progress, or the live edit buffer while one is (see
+    /// `formula_bar::build_field`).
+    pub formula: TextField,
     pub error: Option<String>,
 }
 
@@ -78,6 +90,7 @@ impl CalcApp {
             error: None,
             view: View::default(),
             last_title: None,
+            formula_focused: false,
         }
     }
 
@@ -207,12 +220,21 @@ impl CalcApp {
         &self.view
     }
 
-    /// The grid body's rect — the viewport minus the status bar.
-    fn grid_rect(backend: &dyn Backend) -> Rect {
+    /// This frame's [`Bands`] — formula bar, grid body, status bar —
+    /// resolved from `backend`'s own viewport/line-height. Called
+    /// identically by `render` (to paint) and `handle` (to hit-test and
+    /// to size the grid controller's own layout), so the two can never
+    /// disagree on where each band sits.
+    fn bands(backend: &dyn Backend) -> Bands {
         let vp = backend.viewport();
         let lh = backend.line_height().max(1.0);
-        let bar_h = if lh > 1.5 { lh * 1.5 } else { lh };
-        Rect::new(0.0, 0.0, vp.width, (vp.height - bar_h).max(0.0))
+        formula_bar::bands(vp.width, vp.height, lh)
+    }
+
+    /// The grid body's rect — the viewport minus the formula bar and the
+    /// status bar.
+    fn grid_rect(backend: &dyn Backend) -> Rect {
+        Self::bands(backend).grid
     }
 
     /// `(row_height, col_width)` to hand `CellGridController::set_sizing`,
@@ -292,11 +314,16 @@ impl CalcApp {
             )
         };
 
+        let active_input = self.cell_input(&a1);
+        let active_text = self.cell_text(&a1);
+        let formula = formula_bar::build_field(&active_input, &self.grid, self.formula_focused);
+
         self.view = View {
             grid: Some(grid),
             selection_label,
-            active_input: self.cell_input(&a1),
-            active_text: self.cell_text(&a1),
+            active_input,
+            active_text,
+            formula,
             error: self.error.clone(),
         };
 
@@ -319,17 +346,21 @@ impl Default for CalcApp {
 }
 
 impl View {
-    /// The whole screen as `ScreenLayout` surfaces, back to front.
-    fn screen(&self, width: f32, height: f32, bar_h: f32) -> ScreenLayout {
+    /// The whole screen as `ScreenLayout` surfaces, back to front:
+    /// formula bar, grid, status bar.
+    fn screen(&self, bands: Bands) -> ScreenLayout {
         let mut layout = ScreenLayout::new();
-        let grid_rect = Rect::new(0.0, 0.0, width, (height - bar_h).max(0.0));
+        layout.push(Surface::TextField {
+            rect: bands.formula,
+            tf: self.formula.clone(),
+        });
         if let Some(grid) = &self.grid {
             layout.push(Surface::CellGrid {
-                rect: grid_rect,
+                rect: bands.grid,
                 grid: grid.clone(),
             });
         }
-        layout.push(self.status_surface(Rect::new(0.0, grid_rect.height, width, bar_h)));
+        layout.push(self.status_surface(bands.status));
         layout
     }
 
@@ -383,15 +414,34 @@ impl AppLogic for CalcApp {
     }
 
     fn render(&self, backend: &mut dyn Backend, _area: ()) {
-        let vp = backend.viewport();
-        let lh = backend.line_height().max(1.0);
-        let bar_h = if lh > 1.5 { lh * 1.5 } else { lh };
-        let layout = self.view.screen(vp.width, vp.height, bar_h);
+        let bands = Self::bands(backend);
+        let layout = self.view.screen(bands);
         let _ = layout.draw(backend);
     }
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {
         self.error = None;
+        // A click on the formula bar opens the same in-progress edit F2
+        // would, just with the caret rendered in the bar instead of over
+        // the cell (`quadraui`'s own `cell_grid_demo` does the same). A
+        // click that lands anywhere else falls through to the checks
+        // below unchanged.
+        if let UiEvent::MouseDown {
+            button: MouseButton::Left,
+            position,
+            ..
+        } = &event
+            && Self::bands(backend).formula.contains(*position)
+        {
+            if !self.grid.is_editing() {
+                let a1 = self.cursor().a1();
+                let text = self.cell_input(&a1);
+                self.grid.start_editing(text);
+            }
+            self.formula_focused = true;
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
         // `q`/Escape quit only outside an active edit — while editing, `q`
         // is a character to insert and Escape cancels the edit instead
         // (`CellGridController::handle` routes both to the edit buffer
@@ -416,6 +466,29 @@ impl AppLogic for CalcApp {
             self.refresh(backend);
             return Reaction::Redraw;
         }
+        // Ctrl+Z/Ctrl+Y (Cmd+Z/Cmd+Y on macOS) undo/redo through the
+        // engine's own history — same "outside an active edit" guard as
+        // Ctrl+S, so the shortcut never fights with typing a literal "z"
+        // or "y" into a cell.
+        if !self.grid.is_editing()
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+            && (modifiers.ctrl || modifiers.cmd)
+        {
+            let command = if matches!(key, Key::Char('z') | Key::Char('Z')) {
+                Some("edit.undo")
+            } else if matches!(key, Key::Char('y') | Key::Char('Y')) {
+                Some("edit.redo")
+            } else {
+                None
+            };
+            if let Some(command) = command {
+                if let Err(e) = self.execute(command, json!({})) {
+                    self.error = Some(e.to_string());
+                }
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+        }
         // `CellGridController::handle` has no arm for `WindowResized` (it
         // owns no viewport-size state of its own, only scroll/cursor), so
         // it falls into `Ignored` and `refresh` below would never run.
@@ -428,6 +501,25 @@ impl AppLogic for CalcApp {
             return Reaction::Redraw;
         }
         let rect = Self::grid_rect(backend);
+        // While the formula bar owns the caret, keys go to it instead of
+        // the grid's own key dispatch — `handle_formula_bar_key` updates
+        // the exact same in-progress edit, so typing there commits the
+        // same way (Enter/Tab/arrows commit and move, Escape cancels).
+        // Anything that isn't a keypress (e.g. a click elsewhere) is left
+        // for a future frame rather than misrouted into the edit buffer.
+        if self.formula_focused {
+            return match &event {
+                UiEvent::KeyPressed { key, modifiers, .. } => {
+                    let event = self.grid.handle_formula_bar_key(key, modifiers, backend, rect);
+                    let reaction = self.apply_controller_event(event);
+                    if matches!(reaction, Reaction::Redraw) {
+                        self.refresh(backend);
+                    }
+                    reaction
+                }
+                _ => Reaction::Continue,
+            };
+        }
         let event = self.grid.handle(&event, backend, rect);
         let reaction = self.apply_controller_event(event);
         if matches!(reaction, Reaction::Redraw) {
@@ -462,6 +554,14 @@ impl CalcApp {
                 if let Err(e) = self.set_cell(&a1, &text) {
                     self.error = Some(e.to_string());
                 }
+                self.formula_focused = false;
+                Reaction::Redraw
+            }
+            // Escape cancelled the edit — whether it was typed through
+            // the grid or the formula bar, neither owns the (now gone)
+            // caret any more.
+            CellGridControllerEvent::CellEditCancelled { .. } => {
+                self.formula_focused = false;
                 Reaction::Redraw
             }
             _ => Reaction::Redraw,
