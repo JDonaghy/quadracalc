@@ -12,5 +12,7 @@ name = "quadracalc-gtk"
 path = "src/main.rs"
 
 [dependencies]
-quadraui = { workspace = true, features = ["gtk"] }
+# "control": `GtkRunner::attach_control`, needed for `--mcp` — see
+# `quadracalc_core::agent`.
+quadraui = { workspace = true, features = ["gtk", "control"] }
 quadracalc-core = { workspace = true }

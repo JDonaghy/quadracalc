@@ -183,3 +183,77 @@ pub fn spawn_mcp_server(
         }
     });
 }
+
+/// This process's own `--mcp` + path argument, shared by all four
+/// binaries so their accepted command line can't drift between them.
+#[derive(Debug)]
+pub struct ParsedArgs {
+    /// Whether `--mcp` was present anywhere in the argument list.
+    pub mcp: bool,
+    /// The last non-flag argument, if any — the workbook path to open
+    /// via `file.open`.
+    pub path: Option<String>,
+}
+
+/// Parses `[--mcp] [path]` out of `args` (a binary's own
+/// `std::env::args().skip(1)`). Unlike a bare `.nth(1)`, an
+/// unrecognised `--flag` (a typo like `--mpc`, or `--help`) is rejected
+/// outright instead of silently being treated as a file path — a
+/// workbook path starting with `--` is not a real-world case worth
+/// supporting at the expense of that error message.
+pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<ParsedArgs, String> {
+    let mut mcp = false;
+    let mut path = None;
+    for arg in args {
+        if arg == "--mcp" {
+            mcp = true;
+        } else if arg.starts_with("--") {
+            return Err(format!("unknown argument: {arg}"));
+        } else {
+            path = Some(arg);
+        }
+    }
+    Ok(ParsedArgs { mcp, path })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(strs: &[&str]) -> Vec<String> {
+        strs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn no_arguments_keeps_both_fields_empty() {
+        let parsed = parse_args(args(&[])).unwrap();
+        assert!(!parsed.mcp);
+        assert_eq!(parsed.path, None);
+    }
+
+    #[test]
+    fn mcp_flag_and_path_can_appear_in_either_order() {
+        let parsed = parse_args(args(&["--mcp", "book.xlsx"])).unwrap();
+        assert!(parsed.mcp);
+        assert_eq!(parsed.path, Some("book.xlsx".to_string()));
+
+        let parsed = parse_args(args(&["book.xlsx", "--mcp"])).unwrap();
+        assert!(parsed.mcp);
+        assert_eq!(parsed.path, Some("book.xlsx".to_string()));
+    }
+
+    #[test]
+    fn the_last_non_flag_argument_wins() {
+        let parsed = parse_args(args(&["first.xlsx", "second.xlsx"])).unwrap();
+        assert_eq!(parsed.path, Some("second.xlsx".to_string()));
+    }
+
+    #[test]
+    fn an_unrecognised_flag_errors_instead_of_being_treated_as_a_path() {
+        let err = parse_args(args(&["--help"])).unwrap_err();
+        assert!(
+            err.contains("--help"),
+            "error should name the bad flag: {err}"
+        );
+    }
+}

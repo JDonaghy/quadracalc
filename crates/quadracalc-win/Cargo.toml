@@ -15,4 +15,6 @@ path = "src/main.rs"
 quadracalc-core = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-quadraui = { workspace = true, features = ["win"] }
+# "control": `WinRunner::attach_control`, needed for `--mcp` — see
+# `quadracalc_core::agent`.
+quadraui = { workspace = true, features = ["win", "control"] }
