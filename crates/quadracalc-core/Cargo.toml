@@ -8,10 +8,18 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-quadraui = { workspace = true }
+# `control`: backend-neutral control channel (`ControlHandle`,
+# `CommandRegistry`) — this crate's own agent-control surface, driven by
+# `quadraui-mcp` or `quadraui::control::cli`, unconditionally on (not an
+# optional feature of this crate): every backend quadracalc ships gets
+# the same three app commands for free.
+quadraui = { workspace = true, features = ["control"] }
+# The MCP server (stdio or a Unix socket) that exposes `quadraui`'s
+# control channel to an agent — see `quadracalc_core::agent`.
+quadraui-mcp = { workspace = true }
 gridcraft-engine = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
-quadraui = { workspace = true, features = ["tui"] }
+quadraui = { workspace = true, features = ["tui", "control"] }

@@ -17,6 +17,7 @@
 //! screen, never the whole sheet.
 
 use gridcraft_engine::{Session, UiRequest};
+use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
     MouseButton, NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface,
@@ -25,6 +26,7 @@ use quadraui::{
 use serde_json::{Value, json};
 
 use crate::address::Address;
+use crate::agent;
 use crate::formula_bar::{self, Bands};
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
 
@@ -57,6 +59,17 @@ pub struct CalcApp {
     /// `:` on a TUI-shaped backend); `None` the rest of the time. While
     /// `Some`, `handle` routes every event to it instead of the grid.
     palette: Option<CommandPalette>,
+    /// "Level 2" app commands an MCP client (or `quadraui::control::cli`)
+    /// drives this app with — see `crate::agent`'s module doc. Swapped
+    /// out for the duration of each `run_command` call per
+    /// `CommandRegistry::run`'s own documented dance, then swapped back.
+    commands: CommandRegistry<CalcApp>,
+    /// Set by `run_command` on a successful Level 2 command, since that
+    /// call has no `&mut dyn Backend` to refresh `view` with on the
+    /// spot the way `handle` does. `tick` is the next hook that *does*
+    /// get a backend, so it refreshes here instead — see that impl's
+    /// own comment.
+    agent_refresh_pending: bool,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -97,6 +110,8 @@ impl CalcApp {
             last_title: None,
             formula_focused: false,
             palette: None,
+            commands: agent::registry(),
+            agent_refresh_pending: false,
         }
     }
 
@@ -464,6 +479,13 @@ impl AppLogic for CalcApp {
     type AreaId = ();
 
     fn setup(&mut self, backend: &mut dyn Backend) {
+        // `snapshot`/`act`/`screenshot` (quadraui-mcp's Level 1 tools)
+        // read `Backend::last_frame`, which only exists once capture is
+        // turned on — see `quadraui::set_frame_capture`'s own doc.
+        // `key`/`type` and this crate's own Level 2 commands don't need
+        // it, but turning it on unconditionally costs nothing on a
+        // backend that never gets an MCP server attached.
+        quadraui::set_frame_capture(backend, true);
         self.refresh(backend);
     }
 
@@ -655,6 +677,39 @@ impl AppLogic for CalcApp {
             self.refresh(backend);
         }
         reaction
+    }
+
+    /// Picks up the refresh `run_command` couldn't do itself (see
+    /// `commands`'s field doc) — the next point in the per-frame loop
+    /// that hands this app a `&mut dyn Backend`. One extra frame of
+    /// delay between an agent-run command and its repaint, the same
+    /// kind of delay `quadraui-mcp`'s own round-trip test polls
+    /// `snapshot` to ride out.
+    fn tick(&mut self, backend: &mut dyn Backend) -> Reaction {
+        if self.agent_refresh_pending {
+            self.agent_refresh_pending = false;
+            self.refresh(backend);
+            Reaction::Redraw
+        } else {
+            Reaction::Continue
+        }
+    }
+
+    fn command_specs(&self) -> Vec<CommandSpec> {
+        self.commands.specs()
+    }
+
+    fn run_command(&mut self, name: &str, args: Value) -> Result<Value, CommandError> {
+        // `CommandRegistry::run`'s documented dance: swap the registry
+        // out so its closures can take `&mut self` without aliasing the
+        // field that holds them, then swap it back.
+        let mut commands = std::mem::take(&mut self.commands);
+        let result = commands.run(self, name, args);
+        self.commands = commands;
+        if result.is_ok() {
+            self.agent_refresh_pending = true;
+        }
+        result
     }
 }
 
