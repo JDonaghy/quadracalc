@@ -962,10 +962,25 @@ impl AppLogic for CalcApp {
         // an active edit only, like every guard above — while editing,
         // Alt+<letter> reaches the edit buffer unchanged, same as any
         // other character.
+        //
+        // Narrowed to ASCII alphanumerics with no Ctrl held, because
+        // `alt` is not only a mnemonic modifier on every backend this
+        // crate runs on:
+        // - On macOS, Option is the *composition* modifier (no Alt/Option
+        //   menu mnemonics exist there at all — Cocoa menus use Cmd), so
+        //   Option+<letter> arrives as `Key::Char` with `alt: true` and a
+        //   composed non-ASCII character (e.g. Option+A -> 'å'). Only
+        //   ASCII alphanumerics are plausible mnemonics, so a composed
+        //   character always falls through to the grid untouched.
+        // - On Windows, AltGr is reported as Ctrl+Alt, and AltGr-composed
+        //   characters (e.g. '@', '{', '€' on European layouts) still
+        //   arrive as a normal `Key::Char`. Requiring `!modifiers.ctrl`
+        //   lets those reach the grid instead of being swallowed.
         if !self.grid.is_editing()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && modifiers.alt
-            && matches!(key, Key::Char(_))
+            && !modifiers.ctrl
+            && matches!(key, Key::Char(c) if c.is_ascii_alphanumeric())
         {
             return Reaction::Continue;
         }
@@ -1342,4 +1357,48 @@ mod tests {
             "Alt+letter must not clobber the active cell's content"
         );
     }
+
+    #[test]
+    fn option_composed_character_still_reaches_the_active_cell() {
+        // macOS Option-composition: Option+A arrives as `Key::Char('å')`
+        // with `alt: true`, since Cocoa has no Alt/Option menu mnemonics
+        // at all. 'å' is not ASCII alphanumeric, so it must not be
+        // swallowed by the mnemonic guard.
+        let mut app = CalcApp::with_sample().unwrap();
+        let mut b = backend();
+        app.setup(&mut b);
+
+        let option_a = UiEvent::KeyPressed {
+            key: Key::Char('å'),
+            modifiers: Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+            repeat: false,
+        };
+        let reaction = app.handle(option_a, &mut b);
+
+        assert_eq!(
+            reaction,
+            Reaction::Redraw,
+            "an Option-composed character must start an edit, not be swallowed"
+        );
+        assert!(
+            app.grid.is_editing(),
+            "Option+A must start editing the active cell on macOS"
+        );
+    }
+
+    // No end-to-end test for the AltGr (Ctrl+Alt) carve-out: `Key::Char`
+    // with `ctrl: true` already falls to
+    // `CellGridController::handle_key`'s own `jump = modifiers.ctrl ||
+    // modifiers.cmd` guard, which treats *any* `ctrl` as a navigation
+    // modifier and skips `begin_typing` regardless of this app's own
+    // mnemonic guard — so an end-to-end `app.handle` test can't yet
+    // observe the `!modifiers.ctrl` condition doing anything, and would
+    // pass or fail for a reason unrelated to this file. That conflation
+    // lives in quadraui's `cell_grid_controller.rs`, out of scope here.
+    // `!modifiers.ctrl` is kept anyway, both because it's the narrow,
+    // correct condition and so a future quadraui fix doesn't silently
+    // regress through this guard.
 }
