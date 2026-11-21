@@ -26,6 +26,7 @@ use serde_json::{Value, json};
 
 use crate::address::Address;
 use crate::formula_bar::{self, Bands};
+use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
 
 /// Rows in the demo sheet — far more than any terminal or window shows at
 /// once, so scrolling to a distant row exercises `CellGrid`'s own
@@ -52,6 +53,10 @@ pub struct CalcApp {
     /// either the bar or the grid), since both end the one shared edit
     /// `CellGridController` tracks (see its module doc).
     formula_focused: bool,
+    /// The command palette's state while it's open (Ctrl+Shift+P, or
+    /// `:` on a TUI-shaped backend); `None` the rest of the time. While
+    /// `Some`, `handle` routes every event to it instead of the grid.
+    palette: Option<CommandPalette>,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -91,6 +96,7 @@ impl CalcApp {
             view: View::default(),
             last_title: None,
             formula_focused: false,
+            palette: None,
         }
     }
 
@@ -235,6 +241,28 @@ impl CalcApp {
     /// status bar.
     fn grid_rect(backend: &dyn Backend) -> Rect {
         Self::bands(backend).grid
+    }
+
+    /// The command palette's popup rect: centred, a fixed fraction of
+    /// the viewport (mirrors `quadraui-gallery`'s own
+    /// `PaletteDemo::popup_rect`), floored at a size the primitive can
+    /// still paint a title/query row plus a few items in.
+    fn palette_rect(backend: &dyn Backend) -> Rect {
+        let vp = backend.viewport();
+        let lh = backend.line_height().max(1.0);
+        let w = (vp.width * 0.7).max(30.0).min(vp.width);
+        let h = (vp.height * 0.6).max(lh * 8.0).min(vp.height);
+        Rect::new((vp.width - w) / 2.0, (vp.height - h) / 2.0, w, h)
+    }
+
+    /// Whether this backend is TUI-shaped — same `chrome_line_height`
+    /// convention `resolve_cell_size` uses, since every current
+    /// `Backend` this workspace can build against reports `1.0` there
+    /// only for the TUI shape. Used to gate the `:` palette shortcut
+    /// (a character TUI users type over Vim-style command lines; on a
+    /// pixel backend it's just a literal colon to enter into a cell).
+    fn is_tui_shaped(backend: &dyn Backend) -> bool {
+        backend.chrome_line_height() <= 1.0
     }
 
     /// `(row_height, col_width)` to hand `CellGridController::set_sizing`,
@@ -415,12 +443,64 @@ impl AppLogic for CalcApp {
 
     fn render(&self, backend: &mut dyn Backend, _area: ()) {
         let bands = Self::bands(backend);
-        let layout = self.view.screen(bands);
+        let mut layout = self.view.screen(bands);
+        // On top of everything else — the palette is a modal overlay,
+        // so it paints last, same as `ScreenLayout`'s own
+        // back-to-front push order for every other overlay surface.
+        if let Some(palette) = &self.palette {
+            layout.push(Surface::Palette {
+                rect: Self::palette_rect(backend),
+                palette: palette.palette(),
+            });
+        }
         let _ = layout.draw(backend);
     }
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {
         self.error = None;
+        // The palette is modal: while it's open, every key goes to it
+        // (its own doc: "intercept ALL mouse and keyboard events when
+        // open") and nothing else in `handle` runs — a click or a
+        // resize underneath it is swallowed rather than reaching the
+        // grid, same as a dialog/context-menu overlay would.
+        if let Some(palette) = self.palette.as_mut() {
+            let UiEvent::KeyPressed { key, modifiers, .. } = &event else {
+                return Reaction::Continue;
+            };
+            return match palette.handle_key(key, modifiers) {
+                PaletteOutcome::Changed => Reaction::Redraw,
+                PaletteOutcome::Closed => {
+                    self.palette = None;
+                    Reaction::Redraw
+                }
+                PaletteOutcome::Run(id) => {
+                    self.palette = None;
+                    if let Err(e) = self.execute(id, json!({})) {
+                        self.error = Some(e.to_string());
+                    }
+                    self.refresh(backend);
+                    Reaction::Redraw
+                }
+                PaletteOutcome::Ignored => Reaction::Continue,
+            };
+        }
+        // Ctrl+Shift+P (Cmd+Shift+P on macOS), or a bare `:` on a
+        // TUI-shaped backend, opens the palette — outside an active
+        // edit, so neither shortcut fights with typing a literal `:`
+        // or capital `P` into a cell.
+        if !self.grid.is_editing()
+            && !self.formula_focused
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+        {
+            let ctrl_shift_p = (modifiers.ctrl || modifiers.cmd)
+                && modifiers.shift
+                && matches!(key, Key::Char('p') | Key::Char('P'));
+            let colon_on_tui = Self::is_tui_shaped(backend) && matches!(key, Key::Char(':'));
+            if ctrl_shift_p || colon_on_tui {
+                self.palette = Some(CommandPalette::open(&self.session));
+                return Reaction::Redraw;
+            }
+        }
         // A click on the formula bar opens the same in-progress edit F2
         // would, just with the caret rendered in the bar instead of over
         // the cell (`quadraui`'s own `cell_grid_demo` does the same). A
