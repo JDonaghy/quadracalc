@@ -349,6 +349,19 @@ impl CalcApp {
         Address::new(row as u32, col as u32)
     }
 
+    /// The current selection's top-left corner — a single cell's own
+    /// cursor for a one-cell selection, otherwise the same corner
+    /// `CellGridControllerEvent::PasteRequested`'s `anchor_row`/
+    /// `anchor_col` already resolves for a Ctrl+V paste (see that
+    /// event's own doc). `clipboard::paste_from_system` targets this,
+    /// not [`Self::cursor`], so a menu-triggered paste lands on the
+    /// same cell Ctrl+V would for the identical selection — the cursor
+    /// alone can sit at any corner of a Shift-extended selection.
+    pub fn selection_anchor(&self) -> Address {
+        let (top, left, _, _) = self.grid.selection_bounds();
+        Address::new(top as u32, left as u32)
+    }
+
     /// Sheet names in workbook order, exactly as the engine has them —
     /// what the tab bar shows.
     pub fn sheet_names(&self) -> Vec<String> {
@@ -635,9 +648,15 @@ impl CalcApp {
     fn palette_rect(backend: &dyn Backend) -> Rect {
         let vp = backend.viewport();
         let lh = backend.line_height().max(1.0);
+        // Centered within the content area below the menu bar, not the
+        // full viewport — added once the menu bar introduced a 4th
+        // chrome row `bands()` already accounts for; this is the same
+        // "below the bar" region.
+        let menu_h = Self::menu_bar_rect(backend).height;
+        let content_h = (vp.height - menu_h).max(0.0);
         let w = (vp.width * 0.7).max(30.0).min(vp.width);
-        let h = (vp.height * 0.6).max(lh * 8.0).min(vp.height);
-        Rect::new((vp.width - w) / 2.0, (vp.height - h) / 2.0, w, h)
+        let h = (content_h * 0.6).max(lh * 8.0).min(content_h);
+        Rect::new((vp.width - w) / 2.0, menu_h + (content_h - h) / 2.0, w, h)
     }
 
     /// Whether this backend is TUI-shaped — same `chrome_line_height`
@@ -1031,14 +1050,33 @@ impl AppLogic for CalcApp {
                 palette: picker.palette(),
             });
         }
+        let menu_bar_rect = Self::menu_bar_rect(backend);
+        // `MenuSystem::menu_bar()` returns the bar's full declarative
+        // descriptor — every item, each carrying its *entire* submenu
+        // tree regardless of whether a dropdown is actually open (see
+        // that method's own doc) — so pushing it is what keeps the menu
+        // (not just the grid/status bar) visible to the accessibility
+        // tree and to agents over MCP, per this repo's CLAUDE.md: "Paint
+        // through ScreenLayout... Don't call backend.draw_* directly."
+        // Paints the bar itself a second time, below, with the correct
+        // hover-interaction tint `menu_system.render` resolves and this
+        // plain descriptor push cannot — harmless, since that repaint
+        // runs after this one and the pixels are identical otherwise.
+        layout.push(Surface::MenuBar {
+            rect: menu_bar_rect,
+            bar: self.menu_system.menu_bar(),
+        });
         let _ = layout.draw(backend);
-        // Not a `ScreenLayout` surface: `MenuSystem::render` paints
-        // straight through `Backend::draw_menu_bar_with_state`/
-        // `draw_context_menu`, the same compose-helper shape
-        // `quadraui`'s own `MenuBarApp` example uses. Painted last, same
+        // The one thing `Surface::MenuBar` above can't carry: an open
+        // dropdown's actual popup. `MenuSystem::render` paints that (and
+        // repaints the bar itself, this time hover-aware) straight
+        // through `Backend::draw_menu_bar_with_state`/`draw_context_menu`
+        // — quadraui exposes no public accessor for the open dropdown's
+        // own `ContextMenu`/layout to push as a `Surface::ContextMenu`
+        // instead (`MenuSystem::dropdown_stack` is private), so this one
+        // piece stays a direct backend call. Painted last, same
         // "topmost overlay" reasoning as the palette above — an open
         // dropdown must sit over the grid/status bar it's anchored above.
-        let menu_bar_rect = Self::menu_bar_rect(backend);
         self.menu_system.render(backend, menu_bar_rect);
     }
 
@@ -1068,14 +1106,23 @@ impl AppLogic for CalcApp {
                 }
                 PaletteOutcome::Run(id) => {
                     self.palette = None;
-                    // The palette was classified and is now run against
-                    // the UI's own selection, not necessarily the one the
-                    // engine still has cached from the last `cell.set`/
-                    // `edit.undo` — see `sync_selection`'s own doc.
-                    if let Err(e) = self
-                        .sync_selection()
-                        .and_then(|()| self.execute(id, json!({})))
-                    {
+                    // Same "Paste" special case the menu's own
+                    // `Activated` dispatch uses — see
+                    // `clipboard::paste_from_system`'s own doc for why
+                    // this id can't go through a generic `execute`.
+                    let result = if id == "edit.paste" {
+                        clipboard::paste_from_system(self, backend)
+                    } else {
+                        // The palette was classified and is now run
+                        // against the UI's own selection, not
+                        // necessarily the one the engine still has
+                        // cached from the last `cell.set`/`edit.undo` —
+                        // see `sync_selection`'s own doc.
+                        self.sync_selection()
+                            .and_then(|()| self.execute(id, json!({})))
+                            .map(|_| ())
+                    };
+                    if let Err(e) = result {
                         self.error = Some(e.to_string());
                     }
                     self.refresh(backend);
@@ -1167,51 +1214,72 @@ impl AppLogic for CalcApp {
         // interception the palette above gives itself; `Ignored` (the
         // overwhelming majority of events — typing into a cell, grid
         // navigation) falls through to everything below unchanged.
-        let menu_bar_rect = Self::menu_bar_rect(backend);
-        match self.menu_system.handle(&event, backend, menu_bar_rect) {
-            MenuEvent::Activated(id) if id.as_str() == menu::QUIT => return Reaction::Exit,
-            MenuEvent::Activated(id) => {
-                let id_str = id.as_str();
-                // Same "open a picker instead of running it" branch the
-                // palette's own `PaletteOutcome::Pick` uses — a menu
-                // click on Font/Font Size/Fill Color/Font Color/Borders/
-                // Draw Border/Number Format needs the same parameter
-                // dialog, just reached from the menu instead of the
-                // palette. `catalog_id` recovers the `&'static str` the
-                // catalog's own id table holds, since `WidgetId` only
-                // ever gives back a borrowed `&str` and `FormatPicker::
-                // open` wants the former.
-                if format_picker::has_picker(id_str) {
-                    if let Some(cid) = Self::catalog_id(id_str) {
-                        self.format_picker = FormatPicker::open(cid);
+        //
+        // Guarded by "outside an active edit" like every other shortcut
+        // in this function: `MenuSystem::handle` has no notion of
+        // whether a cell/formula-bar edit is in progress, so an
+        // unconditional call would let Alt+<mnemonic letter> open a
+        // dropdown mid-edit, leaving that edit's buffer dangling with no
+        // commit/cancel path reconciled against the now-open menu. A
+        // mouse click on the bar itself is guarded the same way other
+        // chrome clicks are below (the tab-strip click check has the
+        // same guard) — clicking chrome while editing is a no-op here,
+        // not a commit-then-proceed.
+        if !self.grid.is_editing() && !self.formula_focused {
+            let menu_bar_rect = Self::menu_bar_rect(backend);
+            match self.menu_system.handle(&event, backend, menu_bar_rect) {
+                MenuEvent::Activated(id) if id.as_str() == menu::QUIT => return Reaction::Exit,
+                MenuEvent::Activated(id) => {
+                    let id_str = id.as_str();
+                    // Same "open a picker instead of running it" branch the
+                    // palette's own `PaletteOutcome::Pick` uses — a menu
+                    // click on Font/Font Size/Fill Color/Font Color/Borders/
+                    // Draw Border/Number Format needs the same parameter
+                    // dialog, just reached from the menu instead of the
+                    // palette. `catalog_id` recovers the `&'static str` the
+                    // catalog's own id table holds, since `WidgetId` only
+                    // ever gives back a borrowed `&str` and `FormatPicker::
+                    // open` wants the former.
+                    if format_picker::has_picker(id_str) {
+                        match Self::catalog_id(id_str) {
+                            Some(cid) => self.format_picker = FormatPicker::open(cid),
+                            // Unreachable today — `menu::tab_items` only ever
+                            // builds items from `CATALOG` itself, so every id
+                            // it hands back resolves here by construction.
+                            // Surfaced rather than silently dropped in case a
+                            // future catalog id rename ever desyncs the two.
+                            None => {
+                                self.error = Some(format!("no catalog entry for \"{id_str}\""));
+                            }
+                        }
+                        self.refresh(backend);
+                        return Reaction::Redraw;
+                    }
+                    // `sync_selection` before running a catalog command
+                    // against no explicit range, same as the palette run
+                    // above — except "Paste", which needs the system
+                    // clipboard a generic `execute(id, {})` can't reach; see
+                    // `menu::tab_items`'s and `clipboard::paste_from_system`'s
+                    // own docs for why that one id is special-cased here.
+                    let result = if id_str == "edit.paste" {
+                        clipboard::paste_from_system(self, backend)
+                    } else {
+                        self.sync_selection()
+                            .and_then(|()| self.execute(id_str, json!({})))
+                            .map(|_| ())
+                    };
+                    if let Err(e) = result {
+                        self.error = Some(e.to_string());
                     }
                     self.refresh(backend);
                     return Reaction::Redraw;
                 }
-                // `sync_selection` before running a catalog command
-                // against no explicit range, same as the palette run
-                // above — except "Paste", which needs the system
-                // clipboard a generic `execute(id, {})` can't reach; see
-                // `menu::tab_items`'s and `clipboard::paste_from_system`'s
-                // own docs for why that one id is special-cased here.
-                let result = if id_str == "edit.paste" {
-                    clipboard::paste_from_system(self, backend)
-                } else {
-                    self.sync_selection()
-                        .and_then(|()| self.execute(id_str, json!({})))
-                        .map(|_| ())
-                };
-                if let Err(e) = result {
-                    self.error = Some(e.to_string());
+                MenuEvent::StateChanged | MenuEvent::Consumed => {
+                    self.refresh(backend);
+                    return Reaction::Redraw;
                 }
-                self.refresh(backend);
-                return Reaction::Redraw;
+                _ => {}
             }
-            MenuEvent::StateChanged | MenuEvent::Consumed => {
-                self.refresh(backend);
-                return Reaction::Redraw;
-            }
-            _ => {}
         }
         // Ctrl+Shift+P (Cmd+Shift+P on macOS), or a bare `:` on a
         // TUI-shaped backend, opens the palette — outside an active
@@ -1233,6 +1301,14 @@ impl AppLogic for CalcApp {
                 if let Err(e) = self.sync_selection() {
                     self.error = Some(e.to_string());
                 }
+                // `MenuSystem::handle` above has no arm for this chord,
+                // so it falls through here `Ignored` even while a
+                // dropdown is open (no mnemonic/arrow/Enter/mouse
+                // shape matches it). Without this, the menu's own
+                // `open_item` would stay `Some` underneath — and, once
+                // the palette later closes, interactive again — while
+                // the palette is modally open on top of it.
+                self.menu_system.close(backend);
                 self.palette = Some(CommandPalette::open(&self.session));
                 return Reaction::Redraw;
             }
