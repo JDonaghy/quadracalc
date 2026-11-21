@@ -510,7 +510,9 @@ impl AppLogic for CalcApp {
         if self.formula_focused {
             return match &event {
                 UiEvent::KeyPressed { key, modifiers, .. } => {
-                    let event = self.grid.handle_formula_bar_key(key, modifiers, backend, rect);
+                    let event = self
+                        .grid
+                        .handle_formula_bar_key(key, modifiers, backend, rect);
                     let reaction = self.apply_controller_event(event);
                     if matches!(reaction, Reaction::Redraw) {
                         self.refresh(backend);
