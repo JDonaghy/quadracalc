@@ -112,6 +112,33 @@ fn a_disabled_entry_shows_its_reason_and_does_not_run_on_enter() {
     assert!(driver.screen_contains("Commands"), "{}", driver.screen());
 }
 
+/// Clear Contents run from the palette after moving the cursor off A1
+/// acts on the cursor's own cell (A2), not the engine's un-synced
+/// `Default` selection (A1) — regression for the palette running every
+/// command against whatever the engine's `doc().selection` last was
+/// instead of the UI's current one.
+#[test]
+fn palette_command_runs_against_the_current_cursor_not_the_engines_stale_selection() {
+    let mut driver = driver();
+    assert_eq!(driver.app_mut().cell_text("A1"), "Item");
+    assert_eq!(driver.app_mut().cell_text("A2"), "Hosting");
+
+    driver.press_named(NamedKey::Down);
+    assert_eq!(driver.app().cursor().a1(), "A2");
+
+    driver.type_char(':');
+    type_str(&mut driver, "clear contents");
+    assert!(
+        driver.screen_contains("Clear Contents"),
+        "{}",
+        driver.screen()
+    );
+    driver.press_named(NamedKey::Enter);
+
+    assert_eq!(driver.app_mut().cell_text("A2"), "");
+    assert_eq!(driver.app_mut().cell_text("A1"), "Item");
+}
+
 /// Escape dismisses the palette without running anything.
 #[test]
 fn escape_closes_the_palette_without_running_anything() {
