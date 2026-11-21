@@ -42,3 +42,9 @@ fn tui_switch_sheets() {
     let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 80, 24);
     scenarios::switch_sheets(&mut driver);
 }
+
+#[test]
+fn tui_open_menu_and_quit() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
+    scenarios::open_menu_and_quit(&mut driver);
+}

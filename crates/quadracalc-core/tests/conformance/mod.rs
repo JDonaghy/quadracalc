@@ -18,11 +18,9 @@
 //! integration-test binary (it has no `#[test]`s of its own) — only the
 //! two thin runner files that `mod` it do.
 //!
-//! No menu-bar scenario here yet: quadracalc has no menu bar to drive —
-//! issue #16 (menu bar: split the dense Home dropdown) hasn't landed the
-//! widget itself, only the Alt-mnemonic keyboard guard ahead of it. A
-//! `open File, activate an item, Quit` scenario belongs here once that
-//! menu exists to click through.
+//! [`open_menu_and_quit`] is the menu-bar scenario — added once the menu
+//! itself landed; issue #27's own review correctly found no menu bar to
+//! drive yet when this file was first written.
 
 use quadraui::testing::{ConformanceDriver, DriverInput};
 use quadraui::{Key, Modifiers, NamedKey, UiEvent};
@@ -168,4 +166,31 @@ pub fn switch_sheets<D: ConformanceDriver + DriverInput>(d: &mut D) {
         d.screen_has("Item"),
         "clicking the first sheet's tab should switch the visible sheet back to it"
     );
+}
+
+/// Open the File menu by clicking its label, confirm the dropdown's real
+/// catalog items are on screen, then click Quit. Needs a blank
+/// `CalcApp::new()` as its fixture. Only `ConformanceDriver` itself —
+/// `click_text`/`screen_has`/`exited` are all declared there, none on
+/// `DriverInput`, so no ambiguity to fully-qualify against the way
+/// `copy_cut_paste`/`switch_sheets` above have to.
+pub fn open_menu_and_quit<D: ConformanceDriver>(d: &mut D) {
+    assert!(
+        d.screen_has("File"),
+        "the menu bar's own top-level labels should be visible before anything is clicked"
+    );
+
+    d.click_text("File");
+    assert!(
+        d.screen_has("Quit"),
+        "clicking File should open its dropdown, with the Quit item it has no catalog \
+         counterpart for (see crate::menu's own doc) visible on screen"
+    );
+    assert!(
+        d.screen_has("Save"),
+        "the dropdown should also show a real catalog item, not just the appended Quit"
+    );
+
+    d.click_text("Quit");
+    assert!(d.exited(), "activating Quit should return Reaction::Exit");
 }

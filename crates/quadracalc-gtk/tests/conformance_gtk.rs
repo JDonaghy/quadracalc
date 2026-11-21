@@ -44,3 +44,9 @@ fn gtk_switch_sheets() {
     let mut driver = GtkDriver::new(CalcApp::with_sample().unwrap(), W, H);
     scenarios::switch_sheets(&mut driver);
 }
+
+#[test]
+fn gtk_open_menu_and_quit() {
+    let mut driver = GtkDriver::new(CalcApp::new(), W, H);
+    scenarios::open_menu_and_quit(&mut driver);
+}

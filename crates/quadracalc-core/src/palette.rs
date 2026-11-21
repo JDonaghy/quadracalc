@@ -16,14 +16,21 @@
 //! is shown disabled with a short reason, same for an id the catalog
 //! lists but no command implements (`catalog.rs`'s own doc: "a catalog
 //! entry counts as done when a command with its id is registered").
-//! Two exceptions, both shown enabled and routed to a dialog host
-//! instead of a plain `Outcome::Run`: an id `crate::format_picker::has_picker`
-//! knows (`Outcome::Pick`) opens that module's choice dialog to collect
-//! the parameter, and an id `crate::function_picker::has_picker` knows
+//! A command that creates engine-side state this app's `CellGrid`-only
+//! terminal view has no surface for at all (a floating object, or
+//! print-only state) is disabled honestly too, even when every one of
+//! its parameters is otherwise suppliable — see `no_terminal_surface`'s
+//! own doc.
+//!
+//! Three exceptions, all shown enabled and routed around a plain
+//! `Outcome::Run`: an id `crate::format_picker::has_picker` knows
+//! (`Outcome::Pick`) opens that module's choice dialog to collect the
+//! parameter, an id `crate::function_picker::has_picker` knows
 //! (`Outcome::PickFunction`) opens the Formulas tab's searchable
 //! function list instead of running `formulas.insertFunction`/a category
-//! id generically, which would otherwise just discard whatever it
-//! returned.
+//! id generically, and `edit.paste` is shown enabled too — `app.rs`'s
+//! own `Outcome::Run` dispatch special-cases that one id to
+//! `clipboard::paste_from_system` instead of a generic `execute`.
 
 use gridcraft_engine::{Session, catalog::CATALOG, find_command};
 use quadraui::{
@@ -93,6 +100,17 @@ fn classify(session: &Session, id: &str) -> (bool, Option<String>) {
     // parameter through its own dialog host, so a required field here
     // doesn't disable the row the way `unsuppliable_params` below would.
     if crate::format_picker::has_picker(id) {
+        return (true, None);
+    }
+    // Same shape as the picker check above: `edit.paste` needs a
+    // `text`/`at` this function's `(session, id)` signature has no
+    // `Backend` to fill in, but `app.rs`'s own dispatch does (both the
+    // palette's `PaletteOutcome::Run` arm and the menu's `Activated`
+    // arm special-case this id to `clipboard::paste_from_system`
+    // instead of a generic `execute(id, {})`), so it isn't actually
+    // unsuppliable the way `unsuppliable_params` below would classify
+    // it.
+    if id == "edit.paste" {
         return (true, None);
     }
     // The opposite override: a row `unsuppliable_params` would leave

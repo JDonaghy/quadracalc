@@ -66,17 +66,12 @@ fn tab_items(entries: &[Entry], tab: &str) -> Vec<ContextMenuItem> {
         last_group = Some(e.group);
 
         let mut item = action(e.id, e.label);
-        if e.id == "edit.paste" {
-            // `palette::entries` disables this — correctly, for the
-            // palette: classification has no `Backend` to read the
-            // system clipboard from, and neither does a palette run
-            // (`CalcApp::execute(id, json!({}))`, no params). The menu
-            // dispatch path is different: `CalcApp::handle` special-cases
-            // this id and calls `clipboard::paste_from_system`, which
-            // does have a `Backend` and supplies `at`/`text` itself —
-            // see that function's own doc. So this one item overrides
-            // the generic classification instead of inheriting it.
-        } else if !e.enabled {
+        // `palette::entries` already classifies "Paste" (`edit.paste`)
+        // and every `format_picker`-backed id as enabled — see that
+        // module's own doc for why — so this loop needs no override of
+        // its own; `CalcApp::handle`'s menu dispatch special-cases both
+        // the same way the palette's own dispatch does.
+        if !e.enabled {
             item.disabled = true;
             item.detail = e.disabled_reason.as_deref().map(StyledText::plain);
         }
@@ -114,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn edit_paste_is_enabled_despite_the_palettes_own_classification() {
+    fn edit_paste_is_enabled() {
         let mut session = Session::new();
         session.new_workbook();
         let home = menus(&session)
