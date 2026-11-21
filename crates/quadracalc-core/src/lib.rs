@@ -15,6 +15,7 @@ mod clipboard;
 pub mod format_picker;
 mod formula_bar;
 pub mod function_picker;
+mod menu;
 pub mod palette;
 mod sheets;
 mod sidebar;
