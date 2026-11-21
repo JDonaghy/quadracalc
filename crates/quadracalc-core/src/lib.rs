@@ -15,6 +15,7 @@ pub mod format_picker;
 mod formula_bar;
 pub mod palette;
 mod sheets;
+mod sidebar;
 
 pub use address::{Address, column_label};
 pub use app::{CalcApp, View};
