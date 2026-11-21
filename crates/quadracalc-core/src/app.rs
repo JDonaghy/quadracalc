@@ -77,6 +77,14 @@ pub struct CalcApp {
     /// off — see `crate::sheets`'s module doc for why this lives here
     /// rather than in the engine.
     sheet_cursors: sheets::SheetCursors,
+    /// The sheet-tabs strip's own scroll offset — the app's half of the
+    /// `TabBar` backend contract (`quadraui::TabBar::layout`'s doc): the
+    /// bar's `scroll_offset` field is only ever an *input*, and the
+    /// caller must write back whatever the backend resolves it to each
+    /// frame (`refresh` does this), or the active tab silently scrolls
+    /// off the strip the first time the sheet labels overflow the bar's
+    /// width.
+    tab_scroll: usize,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -124,6 +132,7 @@ impl CalcApp {
             commands: agent::registry(),
             agent_refresh_pending: false,
             sheet_cursors: sheets::SheetCursors::default(),
+            tab_scroll: 0,
         }
     }
 
@@ -475,9 +484,32 @@ impl CalcApp {
         let active_text = self.cell_text(&a1);
         let formula = formula_bar::build_field(&active_input, &self.grid, self.formula_focused);
 
+        // `TabBar`'s backend contract (`quadraui::TabBar::layout`'s doc):
+        // resolve this frame's scroll offset against the backend's own
+        // measurements and write the corrected value back before this
+        // same frame paints, rather than waiting for the next one — an
+        // `activate_sheet` that lands past the bar's visible range must
+        // make that tab visible immediately, not after one more event.
+        //
+        // `Backend::resolve_tab_bar_layout`'s `TabBarLayout` is not what
+        // computes this: every current backend passes `0.0` for
+        // `scroll_arrow_width`, which (per `TabBar::layout`'s own doc)
+        // puts it in the "caller owns scroll" branch that just echoes
+        // `bar.scroll_offset` back clamped, rather than fitting it to the
+        // active tab. `Backend::tab_bar_layout`'s `TabBarHits` is the one
+        // that actually measures: its `correct_scroll_offset` is
+        // documented as "the offset that would make the active tab
+        // visible given this frame's actual measurements".
+        let tab_bar_rect = Self::tab_bar_rect(backend);
+        let provisional_bar = sheets::tab_bar(&self.session, self.tab_scroll);
+        self.tab_scroll = backend
+            .tab_bar_layout(tab_bar_rect, &provisional_bar)
+            .correct_scroll_offset;
+        let tab_bar = sheets::tab_bar(&self.session, self.tab_scroll);
+
         self.view = View {
             grid: Some(grid),
-            tab_bar: Some(sheets::tab_bar(&self.session)),
+            tab_bar: Some(tab_bar),
             selection_label,
             active_input,
             active_text,

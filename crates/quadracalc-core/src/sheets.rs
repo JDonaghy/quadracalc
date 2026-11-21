@@ -52,10 +52,19 @@ pub fn active_sheet_name(session: &Session) -> Option<String> {
 /// active workbook. Never cached — any `home.insertSheet`/
 /// `sheet.rename`/`sheet.activate` makes a stashed copy stale the moment
 /// it runs, so `CalcApp::refresh` just rebuilds this every frame the way
-/// it rebuilds the rest of `View`. No close button: this app has no way
-/// to delete a sheet yet, so showing a `×` nothing responds to would be
-/// misleading.
-pub fn tab_bar(session: &Session) -> TabBar {
+/// it rebuilds the rest of `View`. No close button: `home.deleteSheet`
+/// exists, but it isn't wired to this bar yet, so showing a `×` nothing
+/// responds to would be misleading.
+///
+/// `scroll_offset` is the caller's own stored value (`CalcApp::tab_scroll`)
+/// — per `TabBar`'s backend contract (`quadraui::TabBar::layout`'s doc),
+/// the caller owns scroll and must feed back whatever
+/// `Backend::tab_bar_layout`'s `correct_scroll_offset` resolves it to
+/// (see `CalcApp::refresh`'s own comment for why that method rather than
+/// `Backend::resolve_tab_bar_layout`), or an overflowing bar permanently
+/// drops the active tab off the strip the moment the stored offset goes
+/// stale.
+pub fn tab_bar(session: &Session, scroll_offset: usize) -> TabBar {
     let names = sheet_names(session);
     let active = active_sheet_index(session);
     TabBar {
@@ -70,7 +79,7 @@ pub fn tab_bar(session: &Session) -> TabBar {
                 ..Default::default()
             })
             .collect(),
-        scroll_offset: 0,
+        scroll_offset,
         right_segments: vec![],
         active_accent: None,
         show_tab_close: false,
