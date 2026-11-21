@@ -20,9 +20,8 @@ use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
-    ListItemMeasure, ListViewHit, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout,
-    SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent,
-    WidgetId,
+    ListViewHit, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout, SidebarPanelHit,
+    StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent, WidgetId,
 };
 use serde_json::{Value, json};
 
@@ -1221,13 +1220,28 @@ impl CalcApp {
             }
             SidebarPanelHit::Content { x, y } => {
                 let list = sidebar::list_view(&self.view.sidebar_names, self.sidebar.selected());
-                let row_h = backend.line_height();
-                let list_layout = list.layout(
+                // `backend.list_layout`, not a bare `line_height`-only
+                // `ListView::layout` call: `line_height` is the
+                // *editor* font metric, while every backend's `draw_list`
+                // paints rows at its own resolved row pitch (GTK/macOS/
+                // Win floor `Style::row_height` at the chrome font; TUI's
+                // is always a whole cell) and reserves a scrollbar column
+                // once the list overflows. `Backend::list_layout` is each
+                // backend's own no-paint twin of that exact resolver —
+                // deprecated in favour of the generic
+                // `DrawsPrimitives::draw_primitive`, but that path needs
+                // a concretely-typed `&mut self` backend, not the
+                // `&dyn Backend` `AppLogic::handle` hands this method —
+                // so this stays the only object-safe way to reach it
+                // (quadraui#2609 tracks a dyn-safe replacement).
+                let area = Rect::new(
+                    0.0,
+                    0.0,
                     layout.content_bounds.width,
                     layout.content_bounds.height,
-                    0.0,
-                    |_| ListItemMeasure::new(row_h),
                 );
+                #[allow(deprecated)]
+                let list_layout = backend.list_layout(area, &list);
                 if let ListViewHit::Item(idx) = list_layout.hit_test(x, y) {
                     self.sidebar.select(idx, self.view.sidebar_names.len());
                 }
