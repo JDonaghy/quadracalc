@@ -950,6 +950,25 @@ impl AppLogic for CalcApp {
                 _ => Reaction::Continue,
             };
         }
+        // Alt+<letter> is reserved for a menu-bar mnemonic — none exist
+        // yet, but `CellGridController::handle` below has no notion of
+        // modifiers at all, so a plain `Key::Char` with `alt` set would
+        // otherwise start an edit and insert that bare letter into the
+        // active cell (e.g. Alt+A on an idle cell silently replacing its
+        // content with "a"). Every other shortcut guard above already
+        // checks `modifiers.ctrl || modifiers.cmd` before letting a
+        // keypress fall through to typing; this is the same guard for
+        // `alt`, swallowing the keypress instead of mistyping it. Outside
+        // an active edit only, like every guard above — while editing,
+        // Alt+<letter> reaches the edit buffer unchanged, same as any
+        // other character.
+        if !self.grid.is_editing()
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+            && modifiers.alt
+            && matches!(key, Key::Char(_))
+        {
+            return Reaction::Continue;
+        }
         let event = self.grid.handle(&event, backend, rect);
         let reaction = self.apply_controller_event(event);
         if matches!(reaction, Reaction::Redraw) {
@@ -1289,5 +1308,38 @@ mod tests {
     fn new_for_path_with_no_path_keeps_the_sample_sheet() {
         let mut app = CalcApp::new_for_path(None).unwrap();
         assert_eq!(app.cell_text("A1"), "Item");
+    }
+
+    #[test]
+    fn alt_letter_is_swallowed_instead_of_typed_into_the_active_cell() {
+        let mut app = CalcApp::with_sample().unwrap();
+        let mut b = backend();
+        app.setup(&mut b);
+        let before = app.cell_text("A1");
+
+        let alt_a = UiEvent::KeyPressed {
+            key: Key::Char('a'),
+            modifiers: Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+            repeat: false,
+        };
+        let reaction = app.handle(alt_a, &mut b);
+
+        assert_eq!(
+            reaction,
+            Reaction::Continue,
+            "Alt+letter should be swallowed, not start an edit"
+        );
+        assert!(
+            !app.grid.is_editing(),
+            "Alt+letter must not start an in-cell edit"
+        );
+        assert_eq!(
+            app.cell_text("A1"),
+            before,
+            "Alt+letter must not clobber the active cell's content"
+        );
     }
 }
