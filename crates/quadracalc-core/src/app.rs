@@ -20,8 +20,9 @@ use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
-    MouseButton, NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface,
-    TabBar, TabBarHit, TextField, UiEvent, WidgetId,
+    ListItemMeasure, ListViewHit, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout,
+    SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent,
+    WidgetId,
 };
 use serde_json::{Value, json};
 
@@ -32,6 +33,7 @@ use crate::format_picker::{FormatPicker, PickerOutcome};
 use crate::formula_bar::{self, Bands};
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
 use crate::sheets;
+use crate::sidebar::{self, Sidebar};
 
 /// Rows in the demo sheet — far more than any terminal or window shows at
 /// once, so scrolling to a distant row exercises `CellGrid`'s own
@@ -93,6 +95,9 @@ pub struct CalcApp {
     /// off the strip the first time the sheet labels overflow the bar's
     /// width.
     tab_scroll: usize,
+    /// The right-hand Name Manager sidebar's open/selected state — see
+    /// `crate::sidebar`'s module doc. Closed by default.
+    sidebar: Sidebar,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -107,6 +112,11 @@ pub struct View {
     /// `crate::sheets::tab_bar` on every `refresh`. `None` only before
     /// the first `setup`/`handle` call ever runs, same as `grid`.
     pub tab_bar: Option<TabBar>,
+    /// This frame's Name Manager rows (`formulas.nameManager`) —
+    /// re-fetched on every `refresh` while `CalcApp`'s own `sidebar` is
+    /// open, left empty while it's closed so a closed sidebar never
+    /// pays for a query nothing is showing.
+    pub sidebar_names: Vec<sidebar::NameEntry>,
     /// The cursor's address, or `top:bottom` range notation for a
     /// multi-cell selection.
     pub selection_label: String,
@@ -142,6 +152,7 @@ impl CalcApp {
             agent_refresh_pending: false,
             sheet_cursors: sheets::SheetCursors::default(),
             tab_scroll: 0,
+            sidebar: Sidebar::default(),
         }
     }
 
@@ -360,14 +371,28 @@ impl CalcApp {
     }
 
     /// The grid body's rect — the viewport minus the formula bar, the
-    /// status bar and the sheet-tabs strip.
-    fn grid_rect(backend: &dyn Backend) -> Rect {
-        Self::carve_tab_strip(Self::bands(backend)).0
+    /// status bar, the sheet-tabs strip, and the Name Manager sidebar
+    /// when it's open.
+    fn grid_rect(&self, backend: &dyn Backend) -> Rect {
+        Self::carve_tab_strip(self.content_bands(backend)).0
     }
 
-    /// The sheet-tabs strip's rect.
-    fn tab_bar_rect(backend: &dyn Backend) -> Rect {
-        Self::carve_tab_strip(Self::bands(backend)).1
+    /// The sheet-tabs strip's rect — narrowed the same way `grid_rect`
+    /// is when the sidebar is open, so the strip never runs under it.
+    fn tab_bar_rect(&self, backend: &dyn Backend) -> Rect {
+        Self::carve_tab_strip(self.content_bands(backend)).1
+    }
+
+    /// `Self::bands(backend)` with `grid` narrowed to leave room for
+    /// `sidebar_rect` on the right when `self.sidebar` is open —
+    /// resolved once here so `grid_rect`/`tab_bar_rect`/`render` can't
+    /// disagree on how much width the sidebar actually took.
+    fn content_bands(&self, backend: &dyn Backend) -> Bands {
+        let mut bands = Self::bands(backend);
+        if let Some(sidebar) = self.sidebar_rect(backend) {
+            bands.grid.width -= sidebar.width;
+        }
+        bands
     }
 
     /// `(grid rect, tab-strip rect)`: `formula_bar::bands` only knows
@@ -388,6 +413,38 @@ impl CalcApp {
             tabs_h,
         );
         (grid, tabs)
+    }
+
+    /// The Name Manager sidebar's rect, carved off the right edge of
+    /// `Self::bands(backend).grid` — the same band `carve_tab_strip`
+    /// carves its own strip out of, just the other axis. `None` while
+    /// `self.sidebar` is closed, so every caller that narrows around
+    /// this (`content_bands`, `render`, `handle`'s own click routing)
+    /// leaves the grid exactly as wide as it was before the sidebar
+    /// existed.
+    fn sidebar_rect(&self, backend: &dyn Backend) -> Option<Rect> {
+        if !self.sidebar.is_open() {
+            return None;
+        }
+        let grid = Self::bands(backend).grid;
+        let width = Self::resolve_sidebar_width(grid.width, Self::is_tui_shaped(backend));
+        Some(Rect::new(
+            grid.x + grid.width - width,
+            grid.y,
+            width,
+            grid.height,
+        ))
+    }
+
+    /// The pure formula behind [`Self::sidebar_rect`]'s width, split
+    /// out so it's unit-testable on plain floats — same reasoning as
+    /// [`Self::resolve_cell_size`]. A fixed-ish fraction of the grid
+    /// band's own width, floored at a size that still fits the
+    /// toolbar's title/count/close button and a readable name list,
+    /// and never wider than the band itself.
+    fn resolve_sidebar_width(available_width: f32, tui_shaped: bool) -> f32 {
+        let floor = if tui_shaped { 36.0 } else { 220.0 };
+        (available_width * 0.4).max(floor).min(available_width)
     }
 
     /// The command palette's popup rect: centred, a fixed fraction of
@@ -458,7 +515,7 @@ impl CalcApp {
     fn refresh(&mut self, backend: &mut dyn Backend) {
         let (row_height, col_width) = Self::cell_size(backend);
         self.grid.set_sizing(row_height, col_width);
-        let rect = Self::grid_rect(backend);
+        let rect = self.grid_rect(backend);
         let layout = self.grid.layout(backend, rect).layout;
         let cells: Vec<Vec<Cell>> = layout
             .rows
@@ -509,16 +566,26 @@ impl CalcApp {
         // that actually measures: its `correct_scroll_offset` is
         // documented as "the offset that would make the active tab
         // visible given this frame's actual measurements".
-        let tab_bar_rect = Self::tab_bar_rect(backend);
+        let tab_bar_rect = self.tab_bar_rect(backend);
         let provisional_bar = sheets::tab_bar(&self.session, self.tab_scroll);
         self.tab_scroll = backend
             .tab_bar_layout(tab_bar_rect, &provisional_bar)
             .correct_scroll_offset;
         let tab_bar = sheets::tab_bar(&self.session, self.tab_scroll);
 
+        // Re-fetched only while open — see `View::sidebar_names`'s own
+        // doc for why a closed sidebar leaves this empty instead of
+        // paying for the query every frame.
+        let sidebar_names = if self.sidebar.is_open() {
+            sidebar::fetch_names(&mut self.session)
+        } else {
+            Vec::new()
+        };
+
         self.view = View {
             grid: Some(grid),
             tab_bar: Some(tab_bar),
+            sidebar_names,
             selection_label,
             active_input,
             active_text,
@@ -628,8 +695,30 @@ impl AppLogic for CalcApp {
     }
 
     fn render(&self, backend: &mut dyn Backend, _area: ()) {
-        let bands = Self::bands(backend);
+        let bands = self.content_bands(backend);
         let mut layout = self.view.screen(bands);
+        // Docked chrome, same z-order tier as the grid/tab strip
+        // `screen` just pushed — not an overlay, so it paints before
+        // the palette/format-picker checks below rather than after.
+        if let Some(rect) = self.sidebar_rect(backend) {
+            let panel = sidebar::toolbar_panel(self.view.sidebar_names.len());
+            // `backend.sidebar_panel_layout`, not the primitive's own
+            // pure `SidebarPanel::layout`: `content_bounds` doesn't
+            // depend on button widths, but reusing the same call
+            // `handle_sidebar_click` hit-tests against keeps this from
+            // ever silently drifting from what's actually painted.
+            let panel_layout = backend.sidebar_panel_layout(rect, &panel);
+            layout.push(Surface::SidebarPanel {
+                rect,
+                panel,
+                hovered: None,
+                pressed: None,
+            });
+            layout.push(Surface::List {
+                rect: panel_layout.content_bounds,
+                list: sidebar::list_view(&self.view.sidebar_names, self.sidebar.selected()),
+            });
+        }
         // On top of everything else — the palette is a modal overlay,
         // so it paints last, same as `ScreenLayout`'s own
         // back-to-front push order for every other overlay surface.
@@ -758,6 +847,20 @@ impl AppLogic for CalcApp {
                 return Reaction::Redraw;
             }
         }
+        // Ctrl+F3 (Cmd+F3 on macOS) toggles the Name Manager sidebar —
+        // see `crate::sidebar`'s module doc for why that's GridCraft's
+        // own shortcut for `formulas.nameManager` rather than one this
+        // app picked on its own. Same "outside an active edit" guard as
+        // every shortcut above.
+        if !self.grid.is_editing()
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+            && (modifiers.ctrl || modifiers.cmd)
+            && matches!(key, Key::Named(NamedKey::F(3)))
+        {
+            self.sidebar.toggle();
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
         // A click on the formula bar opens the same in-progress edit F2
         // would, just with the caret rendered in the bar instead of over
         // the cell (`quadraui`'s own `cell_grid_demo` does the same). A
@@ -791,7 +894,7 @@ impl AppLogic for CalcApp {
                 ..
             } = &event
         {
-            let rect = Self::tab_bar_rect(backend);
+            let rect = self.tab_bar_rect(backend);
             if rect.contains(*position) {
                 if let Some(bar) = self.view.tab_bar.clone() {
                     let local_x = position.x - rect.x;
@@ -807,6 +910,28 @@ impl AppLogic for CalcApp {
                 self.refresh(backend);
                 return Reaction::Redraw;
             }
+        }
+        // A click inside the Name Manager sidebar — the toolbar's close
+        // button, or a row in the name list — routed through the same
+        // `SidebarPanel`/`ListView` layouts `render` just painted (see
+        // `handle_sidebar_click`'s own doc). Guarded by "outside an
+        // active edit" and checked before the grid's own dispatch below,
+        // same reasoning as the sheet-tabs click above: without this, a
+        // click here would fall through to `self.grid.handle` and be
+        // mis-resolved against a grid column that isn't actually under
+        // the cursor once the sidebar has narrowed the grid's own rect.
+        if !self.grid.is_editing()
+            && let UiEvent::MouseDown {
+                button: MouseButton::Left,
+                position,
+                ..
+            } = &event
+            && let Some(rect) = self.sidebar_rect(backend)
+            && rect.contains(*position)
+        {
+            self.handle_sidebar_click(*position, rect, backend);
+            self.refresh(backend);
+            return Reaction::Redraw;
         }
         // `q`/Escape quit only outside an active edit — while editing, `q`
         // is a character to insert and Escape cancels the edit instead
@@ -928,7 +1053,7 @@ impl AppLogic for CalcApp {
             self.refresh(backend);
             return Reaction::Redraw;
         }
-        let rect = Self::grid_rect(backend);
+        let rect = self.grid_rect(backend);
         // While the formula bar owns the caret, keys go to it instead of
         // the grid's own key dispatch — `handle_formula_bar_key` updates
         // the exact same in-progress edit, so typing there commits the
@@ -1078,6 +1203,38 @@ impl CalcApp {
                 Reaction::Redraw
             }
             _ => Reaction::Redraw,
+        }
+    }
+
+    /// Resolves a click already known to land inside `rect` (`handle`'s
+    /// own `self.sidebar_rect(backend)` check) against the same
+    /// `SidebarPanel`/`ListView` layouts `render` paints this panel
+    /// with, and applies it: the toolbar's close button closes the
+    /// sidebar, a content row selects it. Anything else (the toolbar's
+    /// title/count labels, the gap past the last row) is a no-op.
+    fn handle_sidebar_click(&mut self, position: Point, rect: Rect, backend: &dyn Backend) {
+        let panel = sidebar::toolbar_panel(self.view.sidebar_names.len());
+        let layout = backend.sidebar_panel_layout(rect, &panel);
+        match layout.hit_test(position.x, position.y) {
+            SidebarPanelHit::ToolbarButton(id) if id == sidebar::close_button_id() => {
+                self.sidebar.close();
+            }
+            SidebarPanelHit::Content { x, y } => {
+                let list = sidebar::list_view(&self.view.sidebar_names, self.sidebar.selected());
+                let row_h = backend.line_height();
+                let list_layout = list.layout(
+                    layout.content_bounds.width,
+                    layout.content_bounds.height,
+                    0.0,
+                    |_| ListItemMeasure::new(row_h),
+                );
+                if let ListViewHit::Item(idx) = list_layout.hit_test(x, y) {
+                    self.sidebar.select(idx, self.view.sidebar_names.len());
+                }
+            }
+            SidebarPanelHit::ToolbarButton(_)
+            | SidebarPanelHit::ToolbarEmpty
+            | SidebarPanelHit::Empty => {}
         }
     }
 }
