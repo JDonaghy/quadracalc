@@ -20,6 +20,7 @@ use gridcraft_engine::Session;
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
     NamedKey, Reaction, Rect, ScreenLayout, StatusBar, StatusBarSegment, Surface, UiEvent,
+    WidgetId,
 };
 use serde_json::{Value, json};
 
@@ -145,11 +146,40 @@ impl CalcApp {
         Rect::new(0.0, 0.0, vp.width, (vp.height - bar_h).max(0.0))
     }
 
+    /// `(row_height, col_width)` to hand `CellGridController::set_sizing`,
+    /// derived from the backend's own chrome metrics. `CellGrid`'s
+    /// `default_row_height`/`default_col_width` are raw surface-native
+    /// units — cells on TUI, pixels everywhere else — so a pixel backend
+    /// must pick real pixel sizes itself rather than inherit the
+    /// TUI-shaped `1.0`/`8.0` constructor defaults, which would make
+    /// GTK/macOS/Windows paint 1px rows and fetch the whole sheet as the
+    /// "visible" window. Mirrors `quadraui-gallery`'s own
+    /// `CellGridDemo::cell_size`.
+    fn cell_size(backend: &dyn Backend) -> (f32, f32) {
+        Self::resolve_cell_size(backend.chrome_line_height(), backend.char_width())
+    }
+
+    /// The pure formula behind [`Self::cell_size`], split out so it's
+    /// unit-testable on plain floats — every `Backend` this workspace can
+    /// build against in a headless test run reports a `chrome_line_height`
+    /// of `1.0` (the TUI shape), so a test going through `&dyn Backend`
+    /// alone could never reach the pixel-sizing branch a native window
+    /// actually takes.
+    fn resolve_cell_size(chrome_line_height: f32, char_width: f32) -> (f32, f32) {
+        if chrome_line_height <= 1.0 {
+            (1.0, 8.0)
+        } else {
+            (chrome_line_height, char_width * 10.0)
+        }
+    }
+
     /// Re-read exactly the visible window from the engine and rebuild
     /// `self.view` — called from `setup` and every `handle`, which are the
     /// only places with a `backend` to resolve
     /// `CellGridController::layout` against.
     fn refresh(&mut self, backend: &dyn Backend) {
+        let (row_height, col_width) = Self::cell_size(backend);
+        self.grid.set_sizing(row_height, col_width);
         let rect = Self::grid_rect(backend);
         let layout = self.grid.layout(backend, rect).layout;
         let cells: Vec<Vec<Cell>> = layout
@@ -220,7 +250,7 @@ impl View {
         };
         let bar_bg = Color::rgb(33, 66, 110);
         let bar = StatusBar {
-            id: quadraui::WidgetId::new("status"),
+            id: WidgetId::new("status"),
             left_segments: vec![
                 StatusBarSegment {
                     text: format!(" {} ", self.selection_label),
@@ -280,6 +310,17 @@ impl AppLogic for CalcApp {
             && matches!(key, Key::Char('q') | Key::Named(NamedKey::Escape))
         {
             return Reaction::Exit;
+        }
+        // `CellGridController::handle` has no arm for `WindowResized` (it
+        // owns no viewport-size state of its own, only scroll/cursor), so
+        // it falls into `Ignored` and `refresh` below would never run.
+        // Without this, `render` keeps painting the cached `View::grid`,
+        // whose loaded window was sized for the old viewport — enlarging
+        // the terminal or window leaves the newly revealed rows/columns
+        // blank until the next cursor move. Refresh explicitly instead.
+        if let UiEvent::WindowResized { .. } = &event {
+            self.refresh(backend);
+            return Reaction::Redraw;
         }
         let rect = Self::grid_rect(backend);
         let event = self.grid.handle(&event, backend, rect);
@@ -407,5 +448,34 @@ mod tests {
         // A plain arrow afterwards collapses the selection back to one cell.
         app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
         assert_eq!(app.grid.selection_anchor(), None);
+    }
+
+    #[test]
+    fn window_resized_refreshes_the_loaded_window() {
+        let mut app = CalcApp::new();
+        let mut b = backend();
+        app.setup(&mut b);
+        let rows_before = app.view().grid.as_ref().unwrap().cells.len();
+
+        // Grow the viewport well past the original 20 rows and re-dispatch
+        // through `handle`, the way a real resize reaches the app — without
+        // an explicit `WindowResized` arm, `CellGridController::handle`
+        // ignores the event and `refresh` never runs, so the cached `View`
+        // stays sized for the old, smaller viewport.
+        let grown = Viewport::new(40.0, 200.0, 1.0);
+        b.begin_frame(grown);
+        let reaction = app.handle(UiEvent::WindowResized { viewport: grown }, &mut b);
+        assert_eq!(reaction, Reaction::Redraw);
+        let rows_after = app.view().grid.as_ref().unwrap().cells.len();
+        assert!(
+            rows_after > rows_before,
+            "resize should load more rows: before={rows_before} after={rows_after}"
+        );
+    }
+
+    #[test]
+    fn cell_size_is_tui_shaped_below_one_chrome_line_and_pixel_scaled_above_it() {
+        assert_eq!(CalcApp::resolve_cell_size(1.0, 1.0), (1.0, 8.0));
+        assert_eq!(CalcApp::resolve_cell_size(18.0, 7.0), (18.0, 70.0));
     }
 }

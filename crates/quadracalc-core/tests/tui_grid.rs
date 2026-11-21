@@ -77,8 +77,11 @@ fn page_down_then_home_scrolls_the_frozen_header_stays_and_column_resets() {
 
     let label = format!("A{}", after_home.row + 1);
     assert!(driver.screen_contains(&label), "{}", driver.screen());
-    // The header row/column strip is CellGrid's own fixed chrome — not part
-    // of the scrolled body — so column `A`'s letter header is still
-    // painted even though the cursor scrolled far down the sheet.
-    assert!(driver.screen_contains("A"), "{}", driver.screen());
+    // The column-letter header strip is CellGrid's own fixed chrome, not
+    // part of the scrolled body, so it paints every frame regardless of
+    // scroll position. `C` names a column the sheet has no data in and
+    // the cursor never visits in this test, so it can only come from that
+    // header strip — unlike `A`, which the cursor-address assertion above
+    // already puts on screen.
+    assert!(driver.screen_contains("C"), "{}", driver.screen());
 }
