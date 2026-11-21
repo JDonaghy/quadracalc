@@ -123,11 +123,12 @@ impl CalcApp {
     }
 
     /// `file.save`: write the active workbook back to the path it was
-    /// opened/saved from. With no such path yet (a workbook that was
-    /// never opened from or saved to a file), the engine queues a
-    /// `saveAs` dialog request instead of erroring — this frontend has no
-    /// dialog UI to answer that with, so this turns it into a plain
-    /// `Err` instead of silently doing nothing.
+    /// opened/saved from. With no such path yet — a workbook that was
+    /// never opened from or saved to a file, or one opened from a format
+    /// the engine won't save in place (e.g. `.ods`) — the engine queues a
+    /// `saveAs` dialog request instead of erroring. Answering that dialog
+    /// is out of scope here, so this turns it into a plain `Err` instead
+    /// of silently doing nothing.
     pub fn save(&mut self) -> anyhow::Result<()> {
         let before = self.session.ui_requests.len();
         self.execute("file.save", json!({}))?;
@@ -137,7 +138,11 @@ impl CalcApp {
         });
         self.session.ui_requests.truncate(before);
         if asked_for_a_path {
-            anyhow::bail!("nothing to save to yet — this workbook was never opened from a file");
+            anyhow::bail!(
+                "nothing to save to yet — this workbook has no file to save in place \
+                 (never opened from a file, or opened from a format that can't be \
+                 saved in place); use \"save as\" instead"
+            );
         }
         Ok(())
     }
@@ -297,10 +302,10 @@ impl CalcApp {
 
         if let Ok(doc) = self.session.doc() {
             let title = Self::window_title(&doc.display_title(), doc.is_dirty());
-            if self.last_title.as_deref() != Some(title.as_str()) {
-                if let Some(window) = backend.window() {
-                    let _ = window.set_title(&title);
-                }
+            if self.last_title.as_deref() != Some(title.as_str())
+                && let Some(window) = backend.window()
+                && window.set_title(&title).is_ok()
+            {
                 self.last_title = Some(title);
             }
         }
@@ -615,6 +620,58 @@ mod tests {
     fn save_without_a_file_errors_instead_of_silently_doing_nothing() {
         let mut app = CalcApp::new();
         assert!(app.save().is_err());
+    }
+
+    #[test]
+    fn ctrl_s_saves_through_handle_and_clears_the_title_dirty_marker() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "quadracalc-ctrl-s-{}-{}.xlsx",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = path.to_str().unwrap();
+
+        let mut app = CalcApp::new();
+        let mut b = backend();
+        app.setup(&mut b);
+        app.save_as(path).unwrap();
+        // `set_cell` rather than typing through the controller — only the
+        // Ctrl+S path under test needs to go through `handle`.
+        app.set_cell("A1", "hello").unwrap();
+        app.refresh(&mut b);
+        assert!(
+            app.last_title.as_deref().unwrap().ends_with('•'),
+            "dirty workbook should show the marker before saving: {:?}",
+            app.last_title
+        );
+
+        let ctrl_s = UiEvent::KeyPressed {
+            key: Key::Char('s'),
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+            repeat: false,
+        };
+        let reaction = app.handle(ctrl_s, &mut b);
+
+        assert_eq!(reaction, Reaction::Redraw);
+        assert!(
+            app.view().error.is_none(),
+            "Ctrl+S should not error: {:?}",
+            app.view().error
+        );
+        assert!(
+            !app.last_title.as_deref().unwrap().ends_with('•'),
+            "save() through Ctrl+S should clear the title's dirty marker: {:?}",
+            app.last_title
+        );
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
