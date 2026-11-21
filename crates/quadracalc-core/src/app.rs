@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use crate::address::Address;
 use crate::agent;
 use crate::clipboard;
+use crate::format_picker::{FormatPicker, PickerOutcome};
 use crate::formula_bar::{self, Bands};
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
 use crate::sheets;
@@ -61,6 +62,13 @@ pub struct CalcApp {
     /// `:` on a TUI-shaped backend); `None` the rest of the time. While
     /// `Some`, `handle` routes every event to it instead of the grid.
     palette: Option<CommandPalette>,
+    /// Open while a Home-menu command that needs a parameter this app
+    /// can't supply up front (a font name/size, a fill/font color, a
+    /// border preset, a number format) is being picked — opened by
+    /// `PaletteOutcome::Pick` in place of running that command
+    /// directly. Modal exactly like `palette`: every event routes here
+    /// instead of the grid while `Some`.
+    format_picker: Option<FormatPicker>,
     /// "Level 2" app commands an MCP client (or `quadraui::control::cli`)
     /// drives this app with — see `crate::agent`'s module doc. Swapped
     /// out for the duration of each `run_command` call per
@@ -129,6 +137,7 @@ impl CalcApp {
             last_title: None,
             formula_focused: false,
             palette: None,
+            format_picker: None,
             commands: agent::registry(),
             agent_refresh_pending: false,
             sheet_cursors: sheets::SheetCursors::default(),
@@ -631,6 +640,14 @@ impl AppLogic for CalcApp {
             });
         }
         let _ = layout.draw(backend);
+        // On top of the palette too (the two are mutually exclusive —
+        // see `handle`'s own modal-routing order — but painted last
+        // regardless, same "overlay paints last" rule as the palette
+        // itself). `FormatPicker` is a quadraui `compose` controller, not
+        // a `Surface` this app pushes itself — see its own `render` doc.
+        if let Some(picker) = &self.format_picker {
+            picker.render(backend);
+        }
     }
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {
@@ -672,7 +689,47 @@ impl AppLogic for CalcApp {
                     self.refresh(backend);
                     Reaction::Redraw
                 }
+                PaletteOutcome::Pick(id) => {
+                    self.palette = None;
+                    self.format_picker = FormatPicker::open(id);
+                    Reaction::Redraw
+                }
                 PaletteOutcome::Ignored => Reaction::Continue,
+            };
+        }
+        // The format picker is modal exactly like the palette above —
+        // every event (including a resize, so the grid behind it stays
+        // sized correctly once it closes) routes here instead of
+        // falling through while it's open.
+        if let Some(picker) = self.format_picker.as_mut() {
+            if matches!(event, UiEvent::WindowResized { .. }) {
+                self.refresh(backend);
+                return Reaction::Continue;
+            }
+            return match picker.handle_event(&event, backend) {
+                PickerOutcome::Changed => Reaction::Redraw,
+                PickerOutcome::Closed => {
+                    self.format_picker = None;
+                    Reaction::Redraw
+                }
+                PickerOutcome::Run(id, params) => {
+                    self.format_picker = None;
+                    // The selection was already synced when the palette
+                    // opened this picker (`PaletteOutcome::Pick` runs
+                    // right after `sync_selection`'s own palette-open
+                    // call); re-running it here is a no-op in practice,
+                    // but keeps this call site self-contained rather
+                    // than relying on that ordering.
+                    if let Err(e) = self
+                        .sync_selection()
+                        .and_then(|()| self.execute(id, params))
+                    {
+                        self.error = Some(e.to_string());
+                    }
+                    self.refresh(backend);
+                    Reaction::Redraw
+                }
+                PickerOutcome::Ignored => Reaction::Continue,
             };
         }
         // Ctrl+Shift+P (Cmd+Shift+P on macOS), or a bare `:` on a

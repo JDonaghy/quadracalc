@@ -16,7 +16,10 @@
 //! is shown disabled with a short reason, same for an id the catalog
 //! lists but no command implements (`catalog.rs`'s own doc: "a catalog
 //! entry counts as done when a command with its id is registered").
-//! Building a parameter dialog is out of scope here.
+//! The one exception is an id `crate::format_picker::has_picker` knows:
+//! it's shown enabled, and running it (`Outcome::Pick` instead of
+//! `Outcome::Run`) opens that module's dialog host to collect the
+//! parameter instead of running the command directly.
 
 use gridcraft_engine::{Session, catalog::CATALOG, find_command};
 use quadraui::{
@@ -44,6 +47,11 @@ pub struct Entry {
     /// Why `enabled` is `false`. Always `Some` when `enabled` is `false`,
     /// always `None` when it's `true`.
     pub disabled_reason: Option<String>,
+    /// Whether running this entry opens a [`crate::format_picker::FormatPicker`]
+    /// (`Outcome::Pick`) instead of running the command directly
+    /// (`Outcome::Run`). Only ever `true` when `enabled` is too — see
+    /// `classify`.
+    pub picker: bool,
 }
 
 /// One row per `CATALOG` entry, each classified against `session`: no
@@ -63,6 +71,7 @@ pub fn entries(session: &Session) -> Vec<Entry> {
                 label,
                 enabled,
                 disabled_reason,
+                picker: enabled && crate::format_picker::has_picker(id),
             }
         })
         .collect()
@@ -75,6 +84,12 @@ fn classify(session: &Session, id: &str) -> (bool, Option<String>) {
     let info = spec.info(session);
     if !info.enabled {
         return (false, info.disabled_reason);
+    }
+    // `crate::format_picker` can supply this command's own required
+    // parameter through its own dialog host, so a required field here
+    // doesn't disable the row the way `unsuppliable_params` below would.
+    if crate::format_picker::has_picker(id) {
+        return (true, None);
     }
     if let Some(fields) = unsuppliable_params(spec.params) {
         return (false, Some(format!("needs {fields}")));
@@ -190,6 +205,10 @@ pub enum Outcome {
     /// the current selection, with no extra params) and close the
     /// palette.
     Run(&'static str),
+    /// The highlighted row needs a parameter `crate::format_picker`
+    /// supplies: close the palette and open a `FormatPicker` for this
+    /// id instead of running it directly.
+    Pick(&'static str),
     /// Escape: close the palette with no further action.
     Closed,
     /// The key meant nothing to the palette (including Enter on a
@@ -280,10 +299,12 @@ impl CommandPalette {
                     return Outcome::Ignored;
                 };
                 let entry = &self.entries[idx];
-                if entry.enabled {
-                    Outcome::Run(entry.id)
-                } else {
+                if !entry.enabled {
                     Outcome::Ignored
+                } else if entry.picker {
+                    Outcome::Pick(entry.id)
+                } else {
+                    Outcome::Run(entry.id)
                 }
             }
             Key::Named(NamedKey::Up) => {

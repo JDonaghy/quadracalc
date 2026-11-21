@@ -11,6 +11,7 @@ mod address;
 pub mod agent;
 mod app;
 mod clipboard;
+pub mod format_picker;
 mod formula_bar;
 pub mod palette;
 mod sheets;
