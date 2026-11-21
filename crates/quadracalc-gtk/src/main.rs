@@ -26,7 +26,13 @@ fn main() -> std::process::ExitCode {
     };
 
     if !args.mcp {
-        return quadraui::gtk::run(app);
+        return match quadraui::gtk::run(app) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("quadracalc: {e}");
+                std::process::ExitCode::FAILURE
+            }
+        };
     }
 
     // Manual runner loop instead of `quadraui::gtk::run` — only this

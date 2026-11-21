@@ -3048,7 +3048,7 @@ dependencies = [
 [[package]]
 name = "quadraui"
 version = "0.11.0"
-source = "git+https://github.com/JDonaghy/quadraui?rev=94433ba130f685af32d731e7d1a5fb47cf4a5051#94433ba130f685af32d731e7d1a5fb47cf4a5051"
+source = "git+https://github.com/JDonaghy/quadraui?rev=cb0341298181e6774587a4f19139ba67da62286c#cb0341298181e6774587a4f19139ba67da62286c"
 dependencies = [
  "arboard",
  "block2",
@@ -3082,7 +3082,7 @@ dependencies = [
 [[package]]
 name = "quadraui-mcp"
 version = "0.1.0"
-source = "git+https://github.com/JDonaghy/quadraui?rev=94433ba130f685af32d731e7d1a5fb47cf4a5051#94433ba130f685af32d731e7d1a5fb47cf4a5051"
+source = "git+https://github.com/JDonaghy/quadraui?rev=cb0341298181e6774587a4f19139ba67da62286c#cb0341298181e6774587a4f19139ba67da62286c"
 dependencies = [
  "quadraui",
  "serde_json",
