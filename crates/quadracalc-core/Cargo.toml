@@ -22,4 +22,8 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 
 [dev-dependencies]
-quadraui = { workspace = true, features = ["tui", "control"] }
+# "gtk": lets this crate's shared `tests/conformance/mod.rs` scenarios
+# (issue #27) be exercised here too if a future test wants a `GtkDriver`
+# fixture directly; today only `quadracalc-gtk`'s own
+# `tests/conformance_gtk.rs` runs them against it.
+quadraui = { workspace = true, features = ["tui", "control", "gtk"] }
