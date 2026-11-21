@@ -14,8 +14,8 @@
 //! JSON — never `crate::format_picker`'s types directly (those get
 //! their own in-crate unit tests).
 
-use quadraui::{Backend, NamedKey, OwnedContent};
 use quadraui::tui::testing::TuiDriver;
+use quadraui::{Backend, NamedKey, OwnedContent};
 use serde_json::json;
 
 use quadracalc_core::CalcApp;
