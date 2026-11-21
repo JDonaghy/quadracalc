@@ -56,6 +56,27 @@ fn shift_arrow_selects_a_range_and_the_status_bar_shows_it() {
 }
 
 #[test]
+fn selecting_the_two_numeric_cells_shows_the_status_bar_summary() {
+    let mut driver = driver();
+    // B2:B3 — the sample's two numeric cells, 1200.50 and 9.
+    driver.press_named(NamedKey::Down);
+    driver.press_named(NamedKey::Right);
+    driver.dispatch(UiEvent::KeyPressed {
+        key: Key::Named(NamedKey::Down),
+        modifiers: Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+        repeat: false,
+    });
+
+    assert!(driver.screen_contains("B2:B3"), "{}", driver.screen());
+    assert!(driver.screen_contains("Average:"), "{}", driver.screen());
+    assert!(driver.screen_contains("Count: 2"), "{}", driver.screen());
+    assert!(driver.screen_contains("Sum:"), "{}", driver.screen());
+}
+
+#[test]
 fn page_down_then_home_scrolls_the_frozen_header_stays_and_column_resets() {
     let mut driver = driver();
     driver.press_named(NamedKey::Right);
