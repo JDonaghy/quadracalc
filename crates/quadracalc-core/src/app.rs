@@ -639,15 +639,17 @@ impl AppLogic for CalcApp {
                 palette: palette.palette(),
             });
         }
-        let _ = layout.draw(backend);
         // On top of the palette too (the two are mutually exclusive —
-        // see `handle`'s own modal-routing order — but painted last
+        // see `handle`'s own modal-routing order — but pushed last
         // regardless, same "overlay paints last" rule as the palette
-        // itself). `FormatPicker` is a quadraui `compose` controller, not
-        // a `Surface` this app pushes itself — see its own `render` doc.
+        // itself). Pushed through the same `ScreenLayout` as everything
+        // else — see `FormatPicker::render`'s own doc — so one `draw`
+        // call below captures it for the accessibility tree and the MCP
+        // frame-capture surface too.
         if let Some(picker) = &self.format_picker {
-            picker.render(backend);
+            picker.render(&mut layout, backend);
         }
+        let _ = layout.draw(backend);
     }
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {

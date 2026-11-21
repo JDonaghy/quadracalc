@@ -16,6 +16,13 @@
 //! format picks from a handful of named codes — all the same
 //! "list of labelled buttons, Enter/click resolves" shape.
 //!
+//! [`FormatPicker::render`] pushes the controller's `Dialog` through
+//! `ScreenLayout` as a `Surface::Dialog`, same as `palette.rs` does for
+//! the command palette — not a direct `MessageDialogController::render`
+//! call — so it shows up in the accessibility tree and the MCP
+//! `snapshot`/`act` surface while it's open, same as everything else
+//! `app.rs` paints.
+//!
 //! [`palette`](crate::palette) treats every id [`choices_for`] knows
 //! about as enabled (it can supply the parameter, just not up front),
 //! and returns [`crate::palette::Outcome::Pick`] instead of `Run` so
@@ -23,8 +30,9 @@
 //! directly.
 
 use quadraui::{
-    Backend, Dialog, Handled, Key, MessageDialogButton, MessageDialogController,
-    MessageDialogOptions, NamedKey, UiEvent, WidgetId,
+    Backend, Dialog, DialogHit, DialogLayout, Handled, Key, MessageDialogButton,
+    MessageDialogController, MessageDialogOptions, NamedKey, Rect, ScreenLayout, Surface,
+    ToolbarItemMeasure, UiEvent, WidgetId,
 };
 use serde_json::{Value, json};
 
@@ -197,8 +205,8 @@ fn number_formats() -> Vec<Choice> {
 pub enum PickerOutcome {
     /// Keyboard focus moved among the choices — redraw, picker stays open.
     Changed,
-    /// Escape, a click outside the dialog, or the explicit Cancel choice:
-    /// close the picker with no further action.
+    /// Escape, a click outside the dialog's bounds, or the explicit
+    /// Cancel choice: close the picker with no further action.
     Closed,
     /// A choice was confirmed: run this id with these params (merged
     /// with whatever `range`/`cell` the caller resolves) and close the
@@ -259,7 +267,8 @@ impl FormatPicker {
             buttons,
             severity: None,
         })
-        .with_vertical_buttons(true);
+        .with_vertical_buttons(true)
+        .with_id(format!("quadracalc-format-picker:{id}"));
         Some(Self {
             command_id: id,
             controller,
@@ -271,22 +280,52 @@ impl FormatPicker {
 
     /// The dialog descriptor this picker is currently showing — mostly
     /// useful to tests; `app.rs` paints through [`Self::render`]
-    /// instead, since [`MessageDialogController`] computes its own
-    /// backend-specific [`quadraui::DialogLayout`] from private fields
-    /// `app.rs` has no way to recompute itself.
+    /// instead.
     pub fn dialog(&self) -> &Dialog {
         self.controller.dialog()
     }
 
-    /// Paint this frame's dialog, centred in `backend`'s viewport.
-    /// Called directly from `AppLogic::render`, the same contract every
-    /// other quadraui `compose` controller (`MessageDialogController`'s
-    /// own module doc: "Call this from `AppLogic::render`") documents —
-    /// unlike `CommandPalette`, a hand-rolled composition `app.rs` owns
-    /// end to end, this one is quadraui's, with no public way to get its
-    /// `DialogLayout` out to push through `ScreenLayout` instead.
-    pub fn render(&self, backend: &mut dyn Backend) {
-        self.controller.render(backend);
+    /// Compute this frame's [`DialogLayout`], centred in `backend`'s
+    /// viewport. [`Self::render`] pushes this through `ScreenLayout` and
+    /// [`Self::handle_event`] hit-tests a click against it — "one layout
+    /// fn, two callers", so paint and hit-test can never disagree.
+    ///
+    /// `MessageDialogController::layout` (what [`MessageDialogController::render`]
+    /// and its own click handling use internally) is private, so this
+    /// recomputes a layout from the public [`Dialog::measure_generic_with_style`]
+    /// and [`Dialog::layout`] primitives instead of calling into it: a
+    /// close approximation of the same sizing (matches it exactly on a
+    /// TUI backend's char-cell geometry; pixel backends' button widths
+    /// may differ by a few pixels since this has no real per-button
+    /// label measurement on hand), but self-consistent between this
+    /// picker's own paint and click paths, which is what matters for
+    /// correctness here.
+    fn layout(&self, backend: &dyn Backend) -> DialogLayout {
+        let m = backend.measure();
+        let viewport = backend.viewport();
+        let viewport_rect = Rect::new(0.0, 0.0, viewport.width, viewport.height);
+        let style = backend.style();
+        let dialog = self.controller.dialog();
+        let measure = dialog.measure_generic_with_style(
+            m.char_width,
+            m.line_height,
+            viewport_rect,
+            0.0,
+            &style,
+        );
+        dialog.layout(viewport_rect, measure, |_| ToolbarItemMeasure::new(0.0))
+    }
+
+    /// Push this frame's dialog through `layout` — the same
+    /// `ScreenLayout`/`Surface` path every other overlay in this app
+    /// (the palette, the grid) paints through, so the picker shows up
+    /// in the accessibility tree and the MCP `snapshot`/`act` surface
+    /// while it's open, not just on screen.
+    pub fn render(&self, layout: &mut ScreenLayout, backend: &dyn Backend) {
+        layout.push(Surface::Dialog {
+            dialog: self.controller.dialog().clone(),
+            layout: self.layout(backend),
+        });
     }
 
     /// Feed one event to the picker. Up/Down are remapped to Left/Right
@@ -295,23 +334,40 @@ impl FormatPicker {
     /// button row), but every choice list here renders
     /// `vertical_buttons`, where Up/Down reads as the natural "next
     /// choice" key.
+    ///
+    /// A `MouseDown` is hit-tested against [`Self::layout`] directly
+    /// instead of going through [`MessageDialogController::handle_event`]
+    /// (whose own click handling hit-tests its private, possibly
+    /// slightly different, internal layout) — so a click always resolves
+    /// against exactly what [`Self::render`] just painted.
     pub fn handle_event(&mut self, event: &UiEvent, backend: &dyn Backend) -> PickerOutcome {
         let remapped = remap_vertical_nav(event);
         let event = remapped.as_ref().unwrap_or(event);
+        if let UiEvent::MouseDown { position, .. } = event {
+            return match self.layout(backend).hit_test(position.x, position.y) {
+                DialogHit::Button(id) => self.resolve(id),
+                DialogHit::Outside => PickerOutcome::Closed,
+                DialogHit::Body | DialogHit::BodyToolbarButton(_) => PickerOutcome::Changed,
+            };
+        }
         match self.controller.handle_event(event, backend) {
-            Handled::Event(chosen) => {
-                if chosen == self.cancel_id {
-                    return PickerOutcome::Closed;
-                }
-                match self.ids.iter().position(|&wid| wid == chosen) {
-                    Some(i) => PickerOutcome::Run(self.command_id, self.params[i].clone()),
-                    // Not one of ours — shouldn't happen, but closing is
-                    // safer than silently running the wrong params.
-                    None => PickerOutcome::Closed,
-                }
-            }
+            Handled::Event(chosen) => self.resolve(chosen),
             Handled::Consumed => PickerOutcome::Changed,
             Handled::Ignored => PickerOutcome::Ignored,
+        }
+    }
+
+    /// Map a resolved button id back onto a [`PickerOutcome`]: the
+    /// Cancel button closes the picker, a choice's id runs its command,
+    /// and anything else (shouldn't happen) closes rather than silently
+    /// running the wrong params.
+    fn resolve(&self, chosen: WidgetId) -> PickerOutcome {
+        if chosen == self.cancel_id {
+            return PickerOutcome::Closed;
+        }
+        match self.ids.iter().position(|&wid| wid == chosen) {
+            Some(i) => PickerOutcome::Run(self.command_id, self.params[i].clone()),
+            None => PickerOutcome::Closed,
         }
     }
 }

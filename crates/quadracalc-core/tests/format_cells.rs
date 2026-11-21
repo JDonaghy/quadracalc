@@ -14,7 +14,7 @@
 //! JSON — never `crate::format_picker`'s types directly (those get
 //! their own in-crate unit tests).
 
-use quadraui::NamedKey;
+use quadraui::{Backend, NamedKey, OwnedContent};
 use quadraui::tui::testing::TuiDriver;
 use serde_json::json;
 
@@ -144,4 +144,54 @@ fn number_format_can_pick_past_the_default_choice() {
 
     let code = style(&mut driver, "A1")["num_fmt"].clone();
     assert!(code.as_str().unwrap_or_default().contains('$'), "{code:?}");
+}
+
+/// The open picker is pushed through `ScreenLayout` as a `Surface::Dialog`
+/// — not painted with a direct `backend.draw_dialog` call that bypasses
+/// frame capture — so it shows up in `Backend::last_frame`'s captured
+/// node tree, the same place the accessibility tree and the MCP
+/// `snapshot`/`act` tools read a screen from (`Backend::last_frame`'s own
+/// doc: "an app that calls `backend.draw_*` methods directly, without a
+/// `ScreenLayout`, gets `None` here even with capture enabled").
+#[test]
+fn the_open_picker_is_captured_in_the_frame_as_a_dialog_node() {
+    let mut driver = driver();
+    driver.type_char(':');
+    type_str(&mut driver, "font size");
+    driver.press_named(NamedKey::Enter);
+    assert!(driver.screen_contains("Font Size"), "{}", driver.screen());
+
+    driver.render();
+    let frame = driver
+        .backend()
+        .last_frame()
+        .expect("frame capture must still have a frame once the picker is open");
+    assert!(
+        frame
+            .nodes()
+            .iter()
+            .any(|n| matches!(n.content, OwnedContent::Dialog(ref d) if d.title.spans[0].text == "Font Size")),
+        "expected a captured Dialog node titled \"Font Size\"; nodes were {:?}",
+        frame.nodes(),
+    );
+}
+
+/// A click outside the picker's dialog box closes it without applying
+/// anything — matching `PickerOutcome::Closed`'s own doc.
+#[test]
+fn clicking_outside_the_picker_closes_it_without_applying_anything() {
+    let mut driver = driver();
+    let before = style(&mut driver, "A1")["font"]["size"].clone();
+
+    driver.type_char(':');
+    type_str(&mut driver, "font size");
+    driver.press_named(NamedKey::Enter);
+    assert!(driver.screen_contains("Font Size"), "{}", driver.screen());
+
+    // The dialog is centred in an 80x24 viewport; the very top-left
+    // corner is well outside its bounds.
+    driver.click(0.0, 0.0);
+
+    assert!(!driver.screen_contains("Cancel"), "{}", driver.screen());
+    assert_eq!(style(&mut driver, "A1")["font"]["size"], before);
 }
