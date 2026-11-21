@@ -119,6 +119,13 @@ pub struct View {
     /// The cursor's address, or `top:bottom` range notation for a
     /// multi-cell selection.
     pub selection_label: String,
+    /// Excel's own bottom-right status-bar summary for the current
+    /// selection — `Average: … Count: … Sum: …` when the selection has at
+    /// least one number, or just `Count: …` for a non-numeric selection
+    /// (text/formulas-as-text/empty), same fallback Excel uses. Empty
+    /// when the selection has no non-empty cells at all, so
+    /// `status_surface` paints nothing rather than a bare `Count: 0`.
+    pub selection_stats: String,
     /// What the user typed into the cursor cell: the formula for a
     /// formula cell.
     pub active_input: String,
@@ -549,6 +556,18 @@ impl CalcApp {
         let active_text = self.cell_text(&a1);
         let formula = formula_bar::build_field(&active_input, &self.grid, self.formula_focused);
 
+        // `selection.stats` reads the engine's own `d.selection.ranges`,
+        // not the grid controller's — `sync_selection` is what normally
+        // keeps those two in step for palette/clipboard commands (see its
+        // own doc), and the status bar needs it just as much, every
+        // frame, so it doesn't report last frame's selection or default
+        // to the engine's `A1`.
+        let _ = self.sync_selection();
+        let selection_stats = self
+            .execute("selection.stats", json!({}))
+            .map(|stats| Self::selection_stats_label(&stats))
+            .unwrap_or_default();
+
         // `TabBar`'s backend contract (`quadraui::TabBar::layout`'s doc):
         // resolve this frame's scroll offset against the backend's own
         // measurements and write the corrected value back before this
@@ -586,6 +605,7 @@ impl CalcApp {
             tab_bar: Some(tab_bar),
             sidebar_names,
             selection_label,
+            selection_stats,
             active_input,
             active_text,
             formula,
@@ -600,6 +620,45 @@ impl CalcApp {
             {
                 self.last_title = Some(title);
             }
+        }
+    }
+
+    /// Formats `selection.stats`'s result (`{count, numeric, sum, min,
+    /// max, average}`, `average` null when `numeric` is `0`) as Excel's
+    /// own status-bar summary: `Average: … Count: … Sum: …` once the
+    /// selection has at least one number, falling back to just `Count:
+    /// …` for a selection that's all text/empty, same as Excel. An empty
+    /// selection (`count == 0`) reports nothing, so `status_surface`
+    /// paints no segment at all rather than a bare `Count: 0`.
+    fn selection_stats_label(stats: &Value) -> String {
+        let count = stats.get("count").and_then(Value::as_u64).unwrap_or(0);
+        if count == 0 {
+            return String::new();
+        }
+        let numeric = stats.get("numeric").and_then(Value::as_u64).unwrap_or(0);
+        if numeric == 0 {
+            return format!("Count: {count}");
+        }
+        let sum = stats.get("sum").and_then(Value::as_f64).unwrap_or(0.0);
+        let average = stats
+            .get("average")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        format!(
+            "Average: {}   Count: {count}   Sum: {}",
+            Self::format_stat_number(average),
+            Self::format_stat_number(sum)
+        )
+    }
+
+    /// A whole number with no decimals, otherwise two — this is a status-
+    /// bar summary, not a cell value, so it doesn't go through the
+    /// engine's cell-format machinery the way `cell_text` does.
+    fn format_stat_number(n: f64) -> String {
+        if n.fract() == 0.0 && n.abs() < 1e15 {
+            format!("{n:.0}")
+        } else {
+            format!("{n:.2}")
         }
     }
 }
@@ -662,13 +721,31 @@ impl View {
                     action_id: None,
                 },
             ],
-            right_segments: vec![StatusBarSegment {
-                text: " quadracalc · GridCraft engine · q quits ".into(),
-                fg: Color::rgb(200, 210, 225),
-                bg: bar_bg,
-                bold: false,
-                action_id: None,
-            }],
+            right_segments: {
+                // Least-important first, most-important (highest
+                // priority to stay visible on a narrow bar) last — see
+                // `StatusBarSegment`'s own doc on `right_segments`
+                // ordering. The selection summary is the one Excel users
+                // actually look for here, so it goes last/rightmost;
+                // the branding stays but yields first on a narrow bar.
+                let mut right = vec![StatusBarSegment {
+                    text: " quadracalc · GridCraft engine · q quits ".into(),
+                    fg: Color::rgb(200, 210, 225),
+                    bg: bar_bg,
+                    bold: false,
+                    action_id: None,
+                }];
+                if !self.selection_stats.is_empty() {
+                    right.push(StatusBarSegment {
+                        text: format!(" {} ", self.selection_stats),
+                        fg: Color::rgb(255, 255, 255),
+                        bg: Color::rgb(20, 45, 80),
+                        bold: false,
+                        action_id: None,
+                    });
+                }
+                right
+            },
         };
         Surface::StatusBar {
             rect,
@@ -1337,6 +1414,43 @@ mod tests {
         // A plain arrow afterwards collapses the selection back to one cell.
         app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
         assert_eq!(app.grid.selection_anchor(), None);
+    }
+
+    #[test]
+    fn selecting_numeric_cells_shows_average_count_and_sum() {
+        let mut app = CalcApp::with_sample().unwrap();
+        let mut b = backend();
+        app.setup(&mut b);
+        // B2:B3 — the sample's two numeric cells, 1200.50 and 9.
+        app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
+        app.handle(key(NamedKey::Right, Modifiers::default()), &mut b);
+        app.handle(key(NamedKey::Down, shift()), &mut b);
+        assert_eq!(app.view().selection_label, "B2:B3");
+        assert_eq!(
+            app.view().selection_stats,
+            "Average: 604.75   Count: 2   Sum: 1209.50"
+        );
+    }
+
+    #[test]
+    fn selecting_text_only_cells_falls_back_to_just_a_count() {
+        let mut app = CalcApp::with_sample().unwrap();
+        let mut b = backend();
+        app.setup(&mut b);
+        // A2:A3 — the sample's two text cells, "Hosting" and "Domains".
+        app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
+        app.handle(key(NamedKey::Down, shift()), &mut b);
+        assert_eq!(app.view().selection_label, "A2:A3");
+        assert_eq!(app.view().selection_stats, "Count: 2");
+    }
+
+    #[test]
+    fn selecting_an_empty_cell_shows_no_stats_at_all() {
+        let mut app = CalcApp::new();
+        let mut b = backend();
+        app.setup(&mut b);
+        assert_eq!(app.view().selection_label, "A1");
+        assert_eq!(app.view().selection_stats, "");
     }
 
     #[test]
