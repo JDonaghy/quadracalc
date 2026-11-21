@@ -9,6 +9,7 @@
 
 mod address;
 mod app;
+mod formula_bar;
 
 pub use address::{Address, column_label};
 pub use app::CalcApp;
