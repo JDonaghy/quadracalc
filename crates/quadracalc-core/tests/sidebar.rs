@@ -98,8 +98,10 @@ fn clicking_the_close_button_closes_the_sidebar() {
     );
 }
 
-/// Clicking a row in the name list selects it without closing the
-/// sidebar or disturbing the grid's own cursor.
+/// Clicking a row in the name list selects it — painted as quadraui's
+/// own `▶ ` selection prefix (`quadraui::tui::list`'s `is_selected`
+/// marker) — without closing the sidebar or disturbing the grid's own
+/// cursor.
 #[test]
 fn clicking_a_name_row_selects_it_without_closing_the_sidebar() {
     let mut driver = driver();
@@ -112,6 +114,11 @@ fn clicking_a_name_row_selects_it_without_closing_the_sidebar() {
         .unwrap();
     driver.dispatch(ctrl_f3());
     assert!(driver.screen_contains("Rate"), "{}", driver.screen());
+    assert!(
+        !driver.screen_contains("▶"),
+        "nothing should be selected yet: {}",
+        driver.screen()
+    );
 
     let (x, y) = driver.find("Rate").expect("the row should be on screen");
     driver.click(x, y);
@@ -121,5 +128,9 @@ fn clicking_a_name_row_selects_it_without_closing_the_sidebar() {
         "clicking a row must not close the sidebar: {}",
         driver.screen()
     );
-    assert!(driver.screen_contains("Rate"), "{}", driver.screen());
+    assert!(
+        driver.screen_contains("▶ Rate"),
+        "the clicked row should now be marked selected: {}",
+        driver.screen()
+    );
 }

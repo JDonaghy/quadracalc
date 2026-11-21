@@ -146,9 +146,9 @@ fn format_value(value: &Value) -> String {
     }
 }
 
-/// The sidebar's own id — shared between `app.rs`'s `Surface::SidebarPanel`
-/// push and this module's `toolbar_panel`, so the two can never disagree.
-pub const PANEL_ID: &str = "sidebar:panel";
+/// The sidebar's own id — only ever read through `toolbar_panel` below,
+/// which is the one place `app.rs` gets it from.
+const PANEL_ID: &str = "sidebar:panel";
 
 /// `WidgetId` for the toolbar's close button — `app.rs`'s hit-test
 /// match compares against this, not the string constant directly, so
@@ -224,7 +224,12 @@ pub fn list_view(names: &[NameEntry], selected: Option<usize>) -> ListView {
         items,
         selected_idx: selected.unwrap_or(0),
         scroll_offset: 0,
-        has_focus: false,
+        // quadraui's list rasteriser gates both the selection
+        // background and the `▶` prefix on `has_focus` (see
+        // `quadraui::tui::list`'s own `is_selected` check) — only
+        // paint a row as selected once there actually is a selection,
+        // same as `CommandPalette::palette`'s `has_focus: true`.
+        has_focus: selected.is_some(),
         bordered: false,
         h_scroll: 0,
         max_content_width: None,
