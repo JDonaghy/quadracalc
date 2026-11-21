@@ -214,3 +214,70 @@ fn tui_driver_clicking_a_tab_switches_the_visible_sheet() {
     assert_eq!(driver.app().active_sheet_index(), 0);
     assert!(driver.screen_contains("Item"), "{}", driver.screen());
 }
+
+/// Blocking fix: once there are more sheets than an 80-column bar can show
+/// at once, the active tab must stay on (or scroll back onto) the strip —
+/// not get silently clipped from index 0 the moment the bar overflows.
+/// Each `home.insertSheet` activates the new sheet immediately, so this
+/// drives the overflow case through the exact path a user hits by adding
+/// sheets one at a time via the command palette.
+#[test]
+fn inserting_past_an_overflowing_tab_bar_keeps_the_active_tab_reachable() {
+    let mut driver = driver();
+    let bar_id = WidgetId::new("quadracalc-sheet-tabs");
+
+    // "Sheet1" plus enough inserted sheets that their " SheetN " labels
+    // can no longer all fit an 80-column strip at once.
+    for _ in 0..14 {
+        driver.type_char(':');
+        type_str(&mut driver, "insert sheet home");
+        driver.press_named(NamedKey::Enter);
+    }
+
+    let last = driver.app().sheet_names().len() - 1;
+    assert_eq!(
+        driver.app().active_sheet_index(),
+        last,
+        "inserting a sheet activates it"
+    );
+    assert!(
+        driver.tab_center(&bar_id, last).is_some(),
+        "the just-activated sheet's tab must be scrolled onto the bar, \
+         not left behind at a stale scroll offset: {}",
+        driver.screen()
+    );
+
+    // Switching all the way back to the first sheet, then forward again,
+    // must keep tracking the active tab rather than getting stuck at
+    // whichever scroll offset the first sheet needed. Driven through
+    // `Ctrl+PageUp`/`Ctrl+PageDown`, same as a real user, so the
+    // assertion exercises `handle`'s own refresh rather than calling
+    // `CalcApp::activate_sheet` directly and skipping it.
+    let ctrl_page = |named| UiEvent::KeyPressed {
+        key: Key::Named(named),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+        repeat: false,
+    };
+    for _ in 0..last {
+        driver.dispatch(ctrl_page(NamedKey::PageUp));
+    }
+    assert_eq!(driver.app().active_sheet_index(), 0);
+    assert!(
+        driver.tab_center(&bar_id, 0).is_some(),
+        "{}",
+        driver.screen()
+    );
+
+    for _ in 0..last {
+        driver.dispatch(ctrl_page(NamedKey::PageDown));
+    }
+    assert_eq!(driver.app().active_sheet_index(), last);
+    assert!(
+        driver.tab_center(&bar_id, last).is_some(),
+        "re-activating the last sheet must scroll it back into view: {}",
+        driver.screen()
+    );
+}
