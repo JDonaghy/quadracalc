@@ -30,8 +30,8 @@
 
 use gridcraft_engine::{Session, find_command};
 use quadraui::{
-    Accelerator, AcceleratorId, AcceleratorScope, ContextMenuItem, KeyBinding, MenuDef,
-    StyledText, WidgetId,
+    Accelerator, AcceleratorId, AcceleratorScope, ContextMenuItem, KeyBinding, MenuDef, StyledText,
+    WidgetId,
 };
 
 use crate::palette::{self, Entry};
@@ -351,9 +351,15 @@ mod tests {
             .find(|m| m.label == "&Home")
             .unwrap();
         let undo = find_recursive(&home.items, "edit.undo").unwrap();
-        assert_eq!(undo.key_equivalent, Some(accelerator("edit.undo", KeyBinding::Undo)));
+        assert_eq!(
+            undo.key_equivalent,
+            Some(accelerator("edit.undo", KeyBinding::Undo))
+        );
         let redo = find_recursive(&home.items, "edit.redo").unwrap();
-        assert_eq!(redo.key_equivalent, Some(accelerator("edit.redo", KeyBinding::Redo)));
+        assert_eq!(
+            redo.key_equivalent,
+            Some(accelerator("edit.redo", KeyBinding::Redo))
+        );
     }
 
     /// Every id #49 lists as already having a working keyboard shortcut
@@ -388,6 +394,9 @@ mod tests {
             );
         }
         let save = find_recursive(&file.items, "file.save").unwrap();
-        assert!(save.key_equivalent.is_some(), "Save should have a key_equivalent hint");
+        assert!(
+            save.key_equivalent.is_some(),
+            "Save should have a key_equivalent hint"
+        );
     }
 }
