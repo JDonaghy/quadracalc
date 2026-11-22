@@ -48,3 +48,9 @@ fn tui_open_menu_and_quit() {
     let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
     scenarios::open_menu_and_quit(&mut driver);
 }
+
+#[test]
+fn tui_open_formulas_menu_opens_function_picker() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
+    scenarios::open_formulas_menu_opens_function_picker(&mut driver);
+}
