@@ -15,8 +15,10 @@ quadracalc is a quadraui frontend for ArtCraft's GridCraft spreadsheet engine. I
 
 ## Testing
 - Core logic gets unit tests in `quadracalc-core`, and they must not need a display.
-- Behaviour visible on screen gets a black-box test driving the TUI through quadraui's `TuiDriver`, asserting on rendered output.
-- Run `cargo test -p quadracalc-core` and `cargo clippy --workspace --exclude quadracalc-gtk -- -D warnings` before you finish. On Linux, include `quadracalc-gtk`.
+- Behaviour visible on screen gets a black-box test written once, generic over `quadraui::testing::ConformanceDriver`, in `quadracalc-core/tests/conformance/mod.rs` — then run against both `TuiDriver` (`quadracalc-core/tests/conformance_tui.rs`) and `GtkDriver` (`quadracalc-gtk/tests/conformance_gtk.rs`), not a TUI-only test. Locate with `click_text`/`type_text`/`press_named`, assert with `screen_has` — never a literal `click(x, y)`, since TUI cells and GTK pixels are different units.
+- A `TuiDriver`-only test is fine only when the behaviour is genuinely TUI-specific (character-grid string matching, a TUI-only shortcut) or GTK can't render the surface under test yet — say which, in the test's own doc comment. The older per-file `TuiDriver` tests already in `editing.rs`/`clipboard.rs`/`sheets.rs`/etc. aren't retroactively required to move; this is the bar for new screen-visible behaviour going forward.
+- `MacDriver`/`WinDriver` exist too (same `ConformanceDriver` shape) but aren't required per-PR — each only compiles on its own platform, so adding one is its own issue dispatched to a machine that can build it, not a blocker for a feature PR.
+- Run `cargo test -p quadracalc-core`, `cargo test -p quadracalc-gtk`, and `cargo clippy --workspace --exclude quadracalc-gtk -- -D warnings` before you finish. On Linux, include `quadracalc-gtk` in the clippy run too.
 
 ## Process
 - `gh` is on the deny-list; use plain `git`.
