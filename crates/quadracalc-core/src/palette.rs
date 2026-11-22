@@ -16,10 +16,14 @@
 //! is shown disabled with a short reason, same for an id the catalog
 //! lists but no command implements (`catalog.rs`'s own doc: "a catalog
 //! entry counts as done when a command with its id is registered").
-//! The one exception is an id `crate::format_picker::has_picker` knows:
-//! it's shown enabled, and running it (`Outcome::Pick` instead of
-//! `Outcome::Run`) opens that module's dialog host to collect the
-//! parameter instead of running the command directly.
+//! Two exceptions, both shown enabled and routed to a dialog host
+//! instead of a plain `Outcome::Run`: an id `crate::format_picker::has_picker`
+//! knows (`Outcome::Pick`) opens that module's choice dialog to collect
+//! the parameter, and an id `crate::function_picker::has_picker` knows
+//! (`Outcome::PickFunction`) opens the Formulas tab's searchable
+//! function list instead of running `formulas.insertFunction`/a category
+//! id generically, which would otherwise just discard whatever it
+//! returned.
 
 use gridcraft_engine::{Session, catalog::CATALOG, find_command};
 use quadraui::{
@@ -240,6 +244,12 @@ pub enum Outcome {
     /// supplies: close the palette and open a `FormatPicker` for this
     /// id instead of running it directly.
     Pick(&'static str),
+    /// The highlighted row is one `crate::function_picker::has_picker`
+    /// claims (`formulas.insertFunction` or a Function Library category):
+    /// close the palette and open a `FunctionPicker` instead of running
+    /// the id directly — running it generically would just discard
+    /// whatever `formulas.functions`/`formulas.insertFunction` returned.
+    PickFunction(&'static str),
     /// Escape: close the palette with no further action.
     Closed,
     /// The key meant nothing to the palette (including Enter on a
@@ -334,6 +344,8 @@ impl CommandPalette {
                     Outcome::Ignored
                 } else if entry.picker {
                     Outcome::Pick(entry.id)
+                } else if crate::function_picker::has_picker(entry.id) {
+                    Outcome::PickFunction(entry.id)
                 } else {
                     Outcome::Run(entry.id)
                 }

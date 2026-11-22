@@ -14,6 +14,7 @@ mod chart_view;
 mod clipboard;
 pub mod format_picker;
 mod formula_bar;
+pub mod function_picker;
 pub mod palette;
 mod sheets;
 mod sidebar;
