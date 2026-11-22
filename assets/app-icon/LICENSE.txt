@@ -1,0 +1,13 @@
+quadracalc app icon (quadracalc.svg and every file derived from it in this directory:
+quadracalc-1024.png, quadracalc-macos-512.png, quadracalc.icns).
+
+Original work written for this project (simple hand-written SVG geometry, not modelled on any
+third-party spreadsheet logo). No third-party material. Licensed like the rest of quadracalc,
+under either of
+
+  * Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+  * MIT license (https://opensource.org/licenses/MIT)
+
+at your option.
+
+Regenerate the derived files following assets/app-icon/README.md's "Regenerate" section.
