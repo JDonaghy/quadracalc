@@ -49,7 +49,13 @@ pub fn menus(session: &Session) -> Vec<MenuDef> {
         .collect();
 
     if let Some(file) = menus.first_mut() {
-        file.items.push(separator());
+        // Guarded rather than unconditional: today's catalog always
+        // gives File real entries, but a future reclassification that
+        // ever left it empty would otherwise render a leading separator
+        // with nothing above it.
+        if !file.items.is_empty() {
+            file.items.push(separator());
+        }
         file.items.push(action(QUIT, "Quit"));
     }
     menus
