@@ -32,6 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p quadracalc -p quadracalc-mac
+      - run: cargo test -p quadracalc-mac
 
   windows:
     name: Windows window
