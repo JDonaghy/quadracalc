@@ -292,3 +292,27 @@ pub fn home_menu_has_grouped_submenus_with_shortcut_hints<D: ConformanceDriver>(
         "\"Copy\" should show its Ctrl+C key_equivalent hint in the dropdown"
     );
 }
+
+/// Clicking the menu's "Save" item on a workbook with no backing file
+/// should surface `CalcApp::save`'s own "nothing to save to yet" error,
+/// not silently succeed. `MenuEvent::Activated`'s dispatch special-cases
+/// `file.save` to call `CalcApp::save` the same way Ctrl+S's keyboard
+/// dispatch does; a bare `execute("file.save", {})` instead would hit
+/// the engine's `UiRequest::Dialog("saveAs", ...)` fallback, return `Ok`,
+/// and leave the status bar showing no error at all — this is the
+/// regression check for that. Needs a blank `CalcApp::new()` as its
+/// fixture (never opened from or saved to a file).
+pub fn menu_save_with_no_file_shows_the_save_error<D: ConformanceDriver>(d: &mut D) {
+    d.click_text("File");
+    assert!(
+        d.screen_has("Save"),
+        "the File dropdown should show a real \"Save\" catalog item"
+    );
+
+    d.click_text("Save");
+    assert!(
+        d.screen_has("nothing to save"),
+        "activating Save through the menu with no backing file should show \
+         `CalcApp::save`'s own error in the status bar, not succeed silently"
+    );
+}

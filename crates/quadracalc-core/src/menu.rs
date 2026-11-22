@@ -135,7 +135,15 @@ fn home_items(session: &Session, entries: &[Entry]) -> Vec<ContextMenuItem> {
 fn undo_redo_items(session: &Session) -> Vec<ContextMenuItem> {
     [
         ("edit.undo", "Undo", KeyBinding::Undo),
-        ("edit.redo", "Redo", KeyBinding::Redo),
+        // Not `KeyBinding::Redo`: that renders "Ctrl+Shift+Z", but
+        // `CalcApp::handle` only dispatches redo on `Ctrl/Cmd+Y` (and its
+        // undo arm, just above in `app.rs`, matches `Ctrl/Cmd+Z` while
+        // ignoring Shift — so "Ctrl+Shift+Z" would actually undo).
+        (
+            "edit.redo",
+            "Redo",
+            KeyBinding::Literal("Ctrl+Y".to_string()),
+        ),
     ]
     .into_iter()
     .map(|(id, label, binding)| {
@@ -178,11 +186,17 @@ fn classified_action(e: &Entry) -> ContextMenuItem {
     item
 }
 
-/// A display-only [`Accelerator`] for `id`'s shortcut, which
-/// `CalcApp::handle` already dispatches straight off raw `KeyPressed`
-/// events rather than through quadraui's own accelerator registry — so
-/// nothing here is ever registered with a backend, this only drives
-/// [`ContextMenuItem::key_equivalent`]'s rendered hint.
+/// An [`Accelerator`] for `id`'s shortcut, which `CalcApp::handle` already
+/// dispatches straight off raw `KeyPressed` events rather than through
+/// quadraui's own accelerator registry — so this never changes what the
+/// registry itself does. It still drives more than a rendered hint on
+/// macOS, though: `quadraui::macos::menu_bar_install` installs every
+/// leaf's `key_equivalent` as a *real* `NSMenu` key equivalent, so AppKit
+/// matches it before `handle` ever sees the keypress and delivers
+/// `MenuEvent::Activated` instead. `CalcApp::handle`'s own `Activated` arm
+/// special-cases exactly the ids that need more than a bare `execute` —
+/// Copy, Cut, Paste, Save — the same way the keyboard dispatch does, so
+/// that reroute stays behaviourally equivalent.
 fn accelerator(id: &str, binding: KeyBinding) -> Accelerator {
     Accelerator {
         id: AcceleratorId::new(id),
@@ -244,6 +258,7 @@ fn separator() -> ContextMenuItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quadraui::{Platform, render_binding};
 
     /// Depth-first search through `items` and every nested
     /// `ContextMenuItem::submenu`, for assertions below that no longer
@@ -342,6 +357,12 @@ mod tests {
     /// submenus on a fresh workbook with nothing yet to undo/redo... a
     /// fresh workbook does have nothing to undo, so assert the shape
     /// (present, with an accelerator) instead of enabled state.
+    ///
+    /// Asserts the *rendered* string, not just that some accelerator was
+    /// set: `CalcApp::handle` only dispatches redo on Ctrl/Cmd+Y (its undo
+    /// arm matches Ctrl/Cmd+Z and ignores Shift), so `KeyBinding::Redo`
+    /// (which renders "Ctrl+Shift+Z") would advertise a combo that
+    /// actually performs undo — the bug this test is here to catch.
     #[test]
     fn home_menu_has_undo_and_redo_with_shortcut_hints() {
         let mut session = Session::new();
@@ -352,13 +373,19 @@ mod tests {
             .unwrap();
         let undo = find_recursive(&home.items, "edit.undo").unwrap();
         assert_eq!(
-            undo.key_equivalent,
-            Some(accelerator("edit.undo", KeyBinding::Undo))
+            render_binding(
+                &undo.key_equivalent.as_ref().unwrap().binding,
+                Platform::Tui
+            ),
+            "Ctrl+Z"
         );
         let redo = find_recursive(&home.items, "edit.redo").unwrap();
         assert_eq!(
-            redo.key_equivalent,
-            Some(accelerator("edit.redo", KeyBinding::Redo))
+            render_binding(
+                &redo.key_equivalent.as_ref().unwrap().binding,
+                Platform::Tui
+            ),
+            "Ctrl+Y"
         );
     }
 

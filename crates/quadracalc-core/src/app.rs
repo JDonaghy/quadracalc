@@ -1357,12 +1357,30 @@ impl AppLogic for CalcApp {
                     }
                     // `sync_selection` before running a catalog command
                     // against no explicit range, same as the palette run
-                    // above — except "Paste", which needs the system
-                    // clipboard a generic `execute(id, {})` can't reach; see
-                    // `menu::tab_items`'s and `clipboard::paste_from_system`'s
-                    // own docs for why that one id is special-cased here.
+                    // above — except for the ids this crate wraps in its
+                    // own helper instead of a bare `execute`: "Paste" needs
+                    // the system clipboard (see `menu::tab_items`'s and
+                    // `clipboard::paste_from_system`'s own docs), "Copy"/
+                    // "Cut" need `clipboard::copy`/`cut`'s mirror onto the
+                    // system clipboard (the same one `CalcApp::handle`'s
+                    // own Ctrl+C/X dispatch uses — a bare `execute` here
+                    // would silently stop populating the OS clipboard), and
+                    // "Save" needs `CalcApp::save`'s "nothing to save to
+                    // yet" handling (the same one Ctrl+S's dispatch uses).
+                    // Keeping all three in step with the keyboard path
+                    // matters most on macOS: a native `NSMenu` key
+                    // equivalent (see `menu::accelerator`'s own doc) bypasses
+                    // `handle`'s `KeyPressed` arms entirely and lands here
+                    // instead, so this arm is that shortcut's only path to
+                    // the engine on that platform.
                     let result = if id_str == "edit.paste" {
                         clipboard::paste_from_system(self, backend)
+                    } else if id_str == "edit.copy" {
+                        clipboard::copy(self, backend)
+                    } else if id_str == "edit.cut" {
+                        clipboard::cut(self, backend)
+                    } else if id_str == "file.save" {
+                        self.save()
                     } else {
                         self.sync_selection()
                             .and_then(|()| self.execute(id_str, json!({})))
