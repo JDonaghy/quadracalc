@@ -20,10 +20,10 @@ use gridcraft_engine::catalog::CATALOG;
 use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
-    AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Chart, Color,
-    Key, ListViewHit, MenuEvent, MenuSystem, Modifiers, MouseButton, NamedKey, Point, Reaction,
-    Rect, ScreenLayout, SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit,
-    TextField, UiEvent, WidgetId, resolve_bar_height,
+    AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, CellStyle,
+    Chart, Color, Key, ListViewHit, MenuEvent, MenuSystem, Modifiers, MouseButton, NamedKey, Point,
+    Reaction, Rect, ScreenLayout, SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar,
+    TabBarHit, TextField, UiEvent, WidgetId, resolve_bar_height,
 };
 use serde_json::{Value, json};
 
@@ -190,7 +190,16 @@ impl CalcApp {
         }
     }
 
-    /// A workbook with a small sample, so a first launch shows a live formula.
+    /// A workbook with a small sample, so a first launch shows a live
+    /// formula — and enough range (headers, a lookup table, a formula
+    /// chain) to be worth a screenshot of the ribbon-style surface this
+    /// app adds over the engine's bare grid: a bold+filled header row, an
+    /// explicit currency number format (not just the `$`-prefix
+    /// autodetect `B2`'s literal input already gets), and a `SUM` feeding
+    /// a `VLOOKUP` against a small rate table. `A1:B4` keeps its original
+    /// cells and formula (`editing.rs`, `open_save.rs` and others assert
+    /// on `=SUM(B2:B3)` and its typed inputs by name); everything new
+    /// lives in the previously-empty columns/rows around it.
     pub fn with_sample() -> anyhow::Result<Self> {
         let mut app = Self::new();
         for (cell, input) in [
@@ -202,9 +211,36 @@ impl CalcApp {
             ("B3", "9"),
             ("A4", "Total"),
             ("B4", "=SUM(B2:B3)"),
+            // A small discount-rate lookup table, and a chain that reads
+            // the sample's own total through a VLOOKUP against it.
+            ("A6", "Tier"),
+            ("B6", "Discount"),
+            ("A7", "Standard"),
+            ("B7", "0.05"),
+            ("A8", "Premium"),
+            ("B8", "0.15"),
+            ("D1", "Tier"),
+            ("D2", "Premium"),
+            ("E1", "Discount"),
+            ("E2", "=VLOOKUP(D2,A7:B8,2,FALSE)"),
+            ("F1", "Discounted Total"),
+            ("F2", "=B4*(1-E2)"),
         ] {
             app.set_cell(cell, input)?;
         }
+        // Bold, filled header row — the Home-tab commands the format
+        // picker now supplies a parameter for (see `format_picker.rs`).
+        app.execute("home.bold", json!({ "range": "A1:B1", "on": true }))?;
+        app.execute(
+            "home.fillColor",
+            json!({ "range": "A1:B1", "color": "#D9E8F5" }),
+        )?;
+        // An explicit currency number format on the cost column, rather
+        // than relying only on `B2`'s typed `$` prefix.
+        app.execute(
+            "home.numberFormat",
+            json!({ "range": "B2:B4", "format": "Currency" }),
+        )?;
         Ok(app)
     }
 
@@ -301,6 +337,49 @@ impl CalcApp {
         };
         let text = cell.get("text").and_then(Value::as_str).unwrap_or_default();
         Self::checkbox_glyph(&cell, text).unwrap_or_else(|| text.to_string())
+    }
+
+    /// This cell's grid presentation: [`Self::cell_text`]'s display text
+    /// plus the `Style` fields [`quadraui::CellGrid`] itself can paint —
+    /// bold and an explicit solid fill colour, read off the same
+    /// `cell.get` call `cell_text` would otherwise make a second time,
+    /// so a visible cell's style costs nothing extra over its text.
+    ///
+    /// Only [`gridcraft_engine::model::Color::Rgb`] (what
+    /// `crate::format_picker`'s colour choices and a plain hex literal
+    /// in a loaded file both produce) resolves to a paintable colour;
+    /// `Auto` and a theme-tinted `Theme(..)` both come back `None`
+    /// (inherit the grid's own default) — resolving a theme tint needs
+    /// the workbook's theme palette, which has no `Session::execute`
+    /// query to read it back through, only ribbon commands that set it.
+    fn grid_cell(&mut self, a1: &str) -> Cell {
+        let Ok(cell) = self.session.execute("cell.get", json!({ "cell": a1 })) else {
+            return Cell::plain(String::new());
+        };
+        let text = cell.get("text").and_then(Value::as_str).unwrap_or_default();
+        let text = Self::checkbox_glyph(&cell, text).unwrap_or_else(|| text.to_string());
+
+        let style = cell.get("style");
+        let bold = style
+            .and_then(|s| s.get("font"))
+            .and_then(|f| f.get("bold"))
+            .and_then(Value::as_bool);
+        let bg = style
+            .and_then(|s| s.get("fill"))
+            .filter(|fill| fill.get("pattern").and_then(Value::as_str) == Some("Solid"))
+            .and_then(|fill| fill.get("fg"))
+            .and_then(|c| c.get("Rgb"))
+            .and_then(Value::as_u64)
+            .map(|rgb| Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
+
+        Cell {
+            text,
+            style: CellStyle {
+                bold,
+                bg,
+                ..CellStyle::default()
+            },
+        }
     }
 
     /// What the user typed into a cell: the formula for a formula cell.
@@ -730,11 +809,7 @@ impl CalcApp {
                 layout
                     .cols
                     .iter()
-                    .map(|c| {
-                        Cell::plain(
-                            self.cell_text(&Address::new(r.index as u32, c.index as u32).a1()),
-                        )
-                    })
+                    .map(|c| self.grid_cell(&Address::new(r.index as u32, c.index as u32).a1()))
                     .collect()
             })
             .collect();
@@ -1891,6 +1966,34 @@ mod tests {
         app.setup(&mut b);
         assert_eq!(app.view().selection_label, "A1");
         assert_eq!(app.view().selection_stats, "");
+    }
+
+    #[test]
+    fn sample_header_row_renders_bold_and_filled_but_the_row_below_does_not() {
+        let mut app = CalcApp::with_sample().unwrap();
+        let mut b = backend();
+        app.setup(&mut b);
+        let grid = app.view().grid.as_ref().unwrap();
+
+        // (0, 0) and (0, 1) are A1/B1 — `home.bold`/`home.fillColor`'s
+        // target range in `with_sample` — with no scroll yet.
+        let a1 = &grid.cells[0][0];
+        let b1 = &grid.cells[0][1];
+        assert_eq!(a1.text, "Item");
+        assert_eq!(a1.style.bold, Some(true));
+        assert!(a1.style.bg.is_some(), "A1 should carry the header fill");
+        assert_eq!(
+            b1.style.bold,
+            Some(true),
+            "fillColor/bold's range is A1:B1, not just A1"
+        );
+        assert_eq!(b1.style.bg, a1.style.bg);
+
+        // A2, one row down, was never formatted and stays plain.
+        let a2 = &grid.cells[1][0];
+        assert_eq!(a2.text, "Hosting");
+        assert_eq!(a2.style.bold, Some(false));
+        assert_eq!(a2.style.bg, None);
     }
 
     #[test]
