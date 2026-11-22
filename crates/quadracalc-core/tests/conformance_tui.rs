@@ -61,3 +61,9 @@ fn tui_home_menu_has_grouped_submenus_with_shortcut_hints() {
     let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
     scenarios::home_menu_has_grouped_submenus_with_shortcut_hints(&mut driver);
 }
+
+#[test]
+fn tui_menu_save_with_no_file_shows_the_save_error() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
+    scenarios::menu_save_with_no_file_shows_the_save_error(&mut driver);
+}
