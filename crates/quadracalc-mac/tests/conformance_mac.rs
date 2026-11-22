@@ -70,3 +70,15 @@ fn mac_open_formulas_menu_opens_function_picker() {
     let mut driver = MacDriver::new(CalcApp::new(), W, H);
     scenarios::open_formulas_menu_opens_function_picker(&mut driver);
 }
+
+#[test]
+fn mac_home_menu_has_grouped_submenus_with_shortcut_hints() {
+    let mut driver = MacDriver::new(CalcApp::new(), W, H);
+    scenarios::home_menu_has_grouped_submenus_with_shortcut_hints(&mut driver);
+}
+
+#[test]
+fn mac_menu_save_with_no_file_shows_the_save_error() {
+    let mut driver = MacDriver::new(CalcApp::new(), W, H);
+    scenarios::menu_save_with_no_file_shows_the_save_error(&mut driver);
+}

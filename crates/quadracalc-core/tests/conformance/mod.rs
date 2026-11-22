@@ -287,9 +287,11 @@ pub fn home_menu_has_grouped_submenus_with_shortcut_hints<D: ConformanceDriver>(
         d.screen_has("Copy"),
         "clicking the \"Clipboard\" group should open its own submenu"
     );
+    // `KeyBinding::Copy` renders platform-appropriately: `⌘C` on macOS,
+    // `Ctrl+C` everywhere else.
     assert!(
-        d.screen_has("Ctrl+C"),
-        "\"Copy\" should show its Ctrl+C key_equivalent hint in the dropdown"
+        d.screen_has("Ctrl+C") || d.screen_has("⌘C"),
+        "\"Copy\" should show its Copy key_equivalent hint (Ctrl+C / ⌘C) in the dropdown"
     );
 }
 
