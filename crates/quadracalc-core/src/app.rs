@@ -20,8 +20,9 @@ use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
     AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Chart, Color,
-    Key, ListViewHit, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout, SidebarPanelHit,
-    StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent, WidgetId,
+    Key, ListViewHit, Modifiers, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout,
+    SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent,
+    WidgetId,
 };
 use serde_json::{Value, json};
 
@@ -31,6 +32,7 @@ use crate::chart_view;
 use crate::clipboard;
 use crate::format_picker::{FormatPicker, PickerOutcome};
 use crate::formula_bar::{self, Bands};
+use crate::function_picker::{self, FunctionPicker, Outcome as FunctionPickerOutcome};
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
 use crate::sheets;
 use crate::sidebar::{self, Sidebar};
@@ -71,6 +73,13 @@ pub struct CalcApp {
     /// directly. Modal exactly like `palette`: every event routes here
     /// instead of the grid while `Some`.
     format_picker: Option<FormatPicker>,
+    /// Open while the Formulas tab's searchable function list is up
+    /// (`formulas.insertFunction`, or a Function Library category —
+    /// `function_picker::has_picker`) — opened by `PaletteOutcome::PickFunction`
+    /// in place of running that id directly. Modal exactly like `palette`
+    /// and `format_picker`: every event routes here instead of the grid
+    /// while `Some`.
+    function_picker: Option<FunctionPicker>,
     /// "Level 2" app commands an MCP client (or `quadraui::control::cli`)
     /// drives this app with — see `crate::agent`'s module doc. Swapped
     /// out for the duration of each `run_command` call per
@@ -162,6 +171,7 @@ impl CalcApp {
             formula_focused: false,
             palette: None,
             format_picker: None,
+            function_picker: None,
             commands: agent::registry(),
             agent_refresh_pending: false,
             sheet_cursors: sheets::SheetCursors::default(),
@@ -404,6 +414,47 @@ impl CalcApp {
         };
         self.execute("selection.set", json!({ "range": range, "active": a1 }))?;
         Ok(())
+    }
+
+    /// `formulas.functions`'s own rows for `id` (`crate::function_picker::query_params`
+    /// resolves the category, if any, straight from the Formulas-tab id
+    /// that opened the picker), turned into a `FunctionPicker`.
+    fn open_function_picker(&mut self, id: &'static str) -> anyhow::Result<FunctionPicker> {
+        let functions = self.execute("formulas.functions", function_picker::query_params(id))?;
+        Ok(FunctionPicker::open(function_picker::parse_entries(
+            &functions,
+        )))
+    }
+
+    /// Types `name` plus `()` into whatever edit is active — through
+    /// `CellGridController::handle_formula_bar_key`, the same per-
+    /// character path a user's own typing takes, so the caret ends up
+    /// right after the closing paren exactly like it would after typing
+    /// the call by hand. If nothing is being edited yet, opens one on
+    /// the formula bar first: seeded with the cursor cell's own raw text
+    /// when that's already a formula (so picking a function from an
+    /// existing one appends a nested call instead of discarding it), or
+    /// with a bare `=` otherwise — same "a name starts the formula"
+    /// convention `gridcraft_engine`'s own `formulas.insertFunction`
+    /// follows for a supplied `name` (`={name}(`), just typed through
+    /// the caret instead of replacing the cell outright.
+    fn insert_function_call(&mut self, name: &str, backend: &mut dyn Backend) {
+        if !self.grid.is_editing() {
+            let a1 = self.cursor().a1();
+            let existing = self.cell_input(&a1);
+            let seed = if existing.starts_with('=') {
+                existing
+            } else {
+                "=".to_string()
+            };
+            self.grid.start_editing(seed);
+            self.formula_focused = true;
+        }
+        let rect = Self::bands(backend).formula;
+        for c in format!("{}()", name.to_ascii_uppercase()).chars() {
+            self.grid
+                .handle_formula_bar_key(&Key::Char(c), &Modifiers::default(), backend, rect);
+        }
     }
 
     pub fn view(&self) -> &View {
@@ -912,6 +963,17 @@ impl AppLogic for CalcApp {
         if let Some(picker) = &self.format_picker {
             picker.render(&mut layout, backend);
         }
+        // Mutually exclusive with both the palette and the format picker
+        // (`handle`'s own modal-routing order again), so "paints last"
+        // never actually layers it over either in practice — same
+        // `Surface::Palette` path as `palette` above, since this is the
+        // same primitive over a different list.
+        if let Some(picker) = &self.function_picker {
+            layout.push(Surface::Palette {
+                rect: Self::palette_rect(backend),
+                palette: picker.palette(),
+            });
+        }
         let _ = layout.draw(backend);
     }
 
@@ -959,6 +1021,15 @@ impl AppLogic for CalcApp {
                     self.format_picker = FormatPicker::open(id);
                     Reaction::Redraw
                 }
+                PaletteOutcome::PickFunction(id) => {
+                    self.palette = None;
+                    match self.open_function_picker(id) {
+                        Ok(picker) => self.function_picker = Some(picker),
+                        Err(e) => self.error = Some(e.to_string()),
+                    }
+                    self.refresh(backend);
+                    Reaction::Redraw
+                }
                 PaletteOutcome::Ignored => Reaction::Continue,
             };
         }
@@ -995,6 +1066,32 @@ impl AppLogic for CalcApp {
                     Reaction::Redraw
                 }
                 PickerOutcome::Ignored => Reaction::Continue,
+            };
+        }
+        // The function picker is modal exactly like the palette and the
+        // format picker above — every event routes here instead of the
+        // grid while it's open.
+        if let Some(picker) = self.function_picker.as_mut() {
+            if matches!(event, UiEvent::WindowResized { .. }) {
+                self.refresh(backend);
+                return Reaction::Continue;
+            }
+            let UiEvent::KeyPressed { key, modifiers, .. } = &event else {
+                return Reaction::Continue;
+            };
+            return match picker.handle_key(key, modifiers) {
+                FunctionPickerOutcome::Changed => Reaction::Redraw,
+                FunctionPickerOutcome::Closed => {
+                    self.function_picker = None;
+                    Reaction::Redraw
+                }
+                FunctionPickerOutcome::Insert(name) => {
+                    self.function_picker = None;
+                    self.insert_function_call(&name, backend);
+                    self.refresh(backend);
+                    Reaction::Redraw
+                }
+                FunctionPickerOutcome::Ignored => Reaction::Continue,
             };
         }
         // Ctrl+Shift+P (Cmd+Shift+P on macOS), or a bare `:` on a
