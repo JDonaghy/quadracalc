@@ -50,3 +50,9 @@ fn gtk_open_menu_and_quit() {
     let mut driver = GtkDriver::new(CalcApp::new(), W, H);
     scenarios::open_menu_and_quit(&mut driver);
 }
+
+#[test]
+fn gtk_open_formulas_menu_opens_function_picker() {
+    let mut driver = GtkDriver::new(CalcApp::new(), W, H);
+    scenarios::open_formulas_menu_opens_function_picker(&mut driver);
+}

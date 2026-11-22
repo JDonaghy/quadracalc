@@ -194,3 +194,50 @@ pub fn open_menu_and_quit<D: ConformanceDriver>(d: &mut D) {
     d.click_text("Quit");
     assert!(d.exited(), "activating Quit should return Reaction::Exit");
 }
+
+/// Open the Formulas menu and click "Financial" — one of the
+/// `function_picker::has_picker` ids the menu's own `Activated` dispatch
+/// has to special-case the same way it already does for
+/// `format_picker::has_picker`, parallel to [`open_menu_and_quit`]'s
+/// File-tab coverage of the generic/Quit branches. Needs a blank
+/// `CalcApp::new()` as its fixture.
+///
+/// "Financial" rather than the Function Library group's own first row
+/// ("Insert Function") deliberately: that row's dropdown position is
+/// right at the menu bar's own row, and on a backend whose dropdown
+/// doesn't fit the fixture's viewport without shifting (`GtkDriver`'s
+/// 480px-tall one, this tab's dropdown has ~20 rows across three
+/// groups) a click there can land back on the tab button instead of the
+/// item — not what this scenario means to exercise. Every
+/// `function_picker::has_picker` id (this one included) routes through
+/// the exact same dispatch branch, so any one of them proves the fix.
+pub fn open_formulas_menu_opens_function_picker<D: ConformanceDriver>(d: &mut D) {
+    assert!(
+        d.screen_has("Formulas"),
+        "the menu bar's own top-level labels should be visible before anything is clicked"
+    );
+
+    d.click_text("Formulas");
+    assert!(
+        d.screen_has("Financial"),
+        "clicking Formulas should open its dropdown, with the real catalog item \
+         \"Financial\" visible on screen"
+    );
+
+    d.click_text("Financial");
+    assert!(
+        d.screen_has("Insert Function"),
+        "activating the id should open the function picker overlay, titled \
+         \"Insert Function\" the same as every category id opens it — not fall through \
+         to the generic `execute` arm, which discards the query result and shows \
+         nothing at all. This title alone rules out the generic arm's own failure mode: \
+         it never shows up from a stray keystroke landing in a cell instead"
+    );
+    // "ACCRINT" sorts first alphabetically among `formulas.functions`'
+    // own Financial-category rows, so it's on screen without typing or
+    // scrolling — a real catalog row, not the title alone.
+    assert!(
+        d.screen_has("ACCRINT"),
+        "the Financial category should list its own real functions"
+    );
+}

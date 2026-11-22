@@ -1255,6 +1255,31 @@ impl AppLogic for CalcApp {
                         self.refresh(backend);
                         return Reaction::Redraw;
                     }
+                    // Same "open a picker instead of running it" branch
+                    // the palette's own `PaletteOutcome::PickFunction`
+                    // uses — the seven Function Library category ids
+                    // are `cmd!(query ...)` wrappers whose result would
+                    // be discarded by the generic arm below, and
+                    // `formulas.insertFunction` only pushes a
+                    // `UiRequest::Dialog` nothing in this crate reads.
+                    // `function_picker::has_picker` and
+                    // `open_function_picker` already exist for exactly
+                    // this; see their own docs.
+                    if function_picker::has_picker(id_str) {
+                        match Self::catalog_id(id_str) {
+                            Some(cid) => match self.open_function_picker(cid) {
+                                Ok(picker) => self.function_picker = Some(picker),
+                                Err(e) => self.error = Some(e.to_string()),
+                            },
+                            // Unreachable today, for the same reason as
+                            // the `format_picker::has_picker` arm above.
+                            None => {
+                                self.error = Some(format!("no catalog entry for \"{id_str}\""));
+                            }
+                        }
+                        self.refresh(backend);
+                        return Reaction::Redraw;
+                    }
                     // `sync_selection` before running a catalog command
                     // against no explicit range, same as the palette run
                     // above — except "Paste", which needs the system
