@@ -4,7 +4,10 @@
 //! `D: quadraui::testing::ConformanceDriver`, and runs unmodified against
 //! every backend driver that implements the trait: `tests/conformance_tui.rs`
 //! in this crate runs them against `TuiDriver`, `tests/conformance_gtk.rs`
-//! in `quadracalc-gtk` runs the exact same functions against `GtkDriver`.
+//! in `quadracalc-gtk` runs the exact same functions against `GtkDriver`,
+//! and `tests/conformance_mac.rs` in `quadracalc-mac` runs them against
+//! `MacDriver` (that last one only actually builds on a macOS host —
+//! see that file's own doc for why).
 //!
 //! Per `quadraui`'s own shared-body rules (`docs/TESTING.md`, the
 //! `quadraui::testing` module doc): locate targets with `click_text`/

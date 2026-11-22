@@ -4,7 +4,8 @@
 //! to the scenario function `tests/conformance/mod.rs` defines once,
 //! generic over any `ConformanceDriver`. `quadracalc-gtk`'s
 //! `tests/conformance_gtk.rs` runs the exact same functions against
-//! `GtkDriver`.
+//! `GtkDriver`, and `quadracalc-mac`'s `tests/conformance_mac.rs` runs
+//! them against `MacDriver` on a macOS host.
 //!
 //! This is additive to, not a replacement for, the existing per-file
 //! `TuiDriver` tests in `tests/editing.rs`/`clipboard.rs`/`sheets.rs`:
