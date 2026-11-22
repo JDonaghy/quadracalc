@@ -11,7 +11,11 @@
 /// rather than loaded from disk so the icon shows up even when the binary
 /// is run from outside the repo (the common case once this is a packaged
 /// `.app`), mirroring `RunConfig::with_app_icon`'s own `ImageSource::Bytes`
-/// contract.
+/// contract. `cfg`-gated alongside `run_config` (its only reader) so a
+/// non-macOS build of this crate — `main` below still has a
+/// `#[cfg(not(target_os = "macos"))]` fallback — doesn't warn on an unused
+/// constant.
+#[cfg(target_os = "macos")]
 const APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/quadracalc-macos-512.png");
 
 #[cfg(target_os = "macos")]
