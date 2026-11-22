@@ -51,6 +51,12 @@ fn win_copy_cut_paste() {
 }
 
 #[test]
+fn win_cut_paste() {
+    let mut driver = WinDriver::new(CalcApp::new(), W, H);
+    scenarios::cut_paste(&mut driver);
+}
+
+#[test]
 fn win_switch_sheets() {
     let mut driver = WinDriver::new(CalcApp::with_sample().unwrap(), W, H);
     scenarios::switch_sheets(&mut driver);

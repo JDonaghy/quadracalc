@@ -39,6 +39,12 @@ fn tui_copy_cut_paste() {
 }
 
 #[test]
+fn tui_cut_paste() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
+    scenarios::cut_paste(&mut driver);
+}
+
+#[test]
 fn tui_switch_sheets() {
     let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 80, 24);
     scenarios::switch_sheets(&mut driver);

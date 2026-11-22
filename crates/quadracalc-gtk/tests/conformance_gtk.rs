@@ -40,6 +40,12 @@ fn gtk_copy_cut_paste() {
 }
 
 #[test]
+fn gtk_cut_paste() {
+    let mut driver = GtkDriver::new(CalcApp::new(), W, H);
+    scenarios::cut_paste(&mut driver);
+}
+
+#[test]
 fn gtk_switch_sheets() {
     let mut driver = GtkDriver::new(CalcApp::with_sample().unwrap(), W, H);
     scenarios::switch_sheets(&mut driver);
