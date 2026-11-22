@@ -11,6 +11,16 @@ publish.workspace = true
 name = "quadracalc-win"
 path = "src/main.rs"
 
+[features]
+# Gates `tests/conformance_win.rs`, kept off the crate's implicit default
+# feature set so a plain `cargo test -p quadracalc-win` (e.g. from a
+# Linux leg's default sweep) builds and runs nothing Windows-specific.
+# `cargo test -p quadracalc-win --features win ...` is the invocation
+# that both compiles and runs that file's `WinDriver`-backed tests —
+# see the test file's own doc for why that only needs `--features win`,
+# not a Windows host, to type-check.
+win = []
+
 [dependencies]
 quadracalc-core = { workspace = true }
 
@@ -18,3 +28,17 @@ quadracalc-core = { workspace = true }
 # "control": `WinRunner::attach_control`, needed for `--mcp` — see
 # `quadracalc_core::agent`.
 quadraui = { workspace = true, features = ["win", "control"] }
+
+[dev-dependencies]
+# Cross-platform (not `target_os`-gated) counterpart of the dependency
+# above, for `tests/conformance_win.rs`. `quadraui`'s own `win` feature
+# type-checks on every host (see `quadraui::win`'s module doc: every
+# real WinAPI/Direct2D call inside it is itself individually
+# `cfg(target_os = "windows")`-gated) — only `WinDriver::new()` panics
+# off Windows. Declaring it unconditionally here (rather than inside
+# this crate's own `win` feature) keeps that feature a pure test-file
+# switch; the dev-dependency's small extra compile cost on non-Windows
+# hosts is paid regardless of whether `--features win` is passed, same
+# trade quadracalc-core's own dev-dependencies make for its `gtk`
+# feature.
+quadraui = { workspace = true, features = ["win"] }
