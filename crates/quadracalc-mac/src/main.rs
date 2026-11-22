@@ -11,8 +11,7 @@
 /// safe-area grid (see that directory's README). Embedded so the binary
 /// doesn't need to locate the asset at runtime.
 #[cfg(target_os = "macos")]
-static APP_ICON_PNG: &[u8] =
-    include_bytes!("../../../assets/app-icon/quadracalc-macos-512.png");
+static APP_ICON_PNG: &[u8] = include_bytes!("../../../assets/app-icon/quadracalc-macos-512.png");
 
 #[cfg(target_os = "macos")]
 fn run_config() -> quadraui::macos::RunConfig {
