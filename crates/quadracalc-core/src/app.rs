@@ -19,14 +19,15 @@
 use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::{
-    AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Color, Key,
-    ListViewHit, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout, SidebarPanelHit,
+    AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, Chart, Color,
+    Key, ListViewHit, MouseButton, NamedKey, Point, Reaction, Rect, ScreenLayout, SidebarPanelHit,
     StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent, WidgetId,
 };
 use serde_json::{Value, json};
 
 use crate::address::Address;
 use crate::agent;
+use crate::chart_view;
 use crate::clipboard;
 use crate::format_picker::{FormatPicker, PickerOutcome};
 use crate::formula_bar::{self, Bands};
@@ -136,6 +137,13 @@ pub struct View {
     /// `formula_bar::build_field`).
     pub formula: TextField,
     pub error: Option<String>,
+    /// The active sheet's charts (`crate::chart_view::charts`), resolved
+    /// fresh on every `refresh` — empty when it has none, which is also
+    /// what tells [`CalcApp::grid_rect`] and [`View::screen`] not to
+    /// carve out a chart panel at all. See `crate::chart_view`'s module
+    /// doc for why this is a quadraui [`Chart`] already resolved to
+    /// plain numbers, not the engine's own `Chart` model.
+    pub charts: Vec<Chart>,
 }
 
 impl CalcApp {
@@ -261,9 +269,18 @@ impl CalcApp {
         Ok(())
     }
 
-    /// The engine's displayed text for a cell (formatted value, not the formula).
+    /// The engine's displayed text for a cell (formatted value, not the
+    /// formula) — `TRUE`/`FALSE` swapped for a checkbox glyph on a cell
+    /// `insert.checkbox` formatted (see [`Self::checkbox_glyph`]'s own
+    /// doc). `cell_input` doesn't get this treatment: an in-progress
+    /// edit needs to see and type the literal `TRUE`/`FALSE`, not a
+    /// glyph that isn't a valid boolean literal to type back in.
     pub fn cell_text(&mut self, a1: &str) -> String {
-        self.cell_field(a1, "text")
+        let Ok(cell) = self.session.execute("cell.get", json!({ "cell": a1 })) else {
+            return String::new();
+        };
+        let text = cell.get("text").and_then(Value::as_str).unwrap_or_default();
+        Self::checkbox_glyph(&cell, text).unwrap_or_else(|| text.to_string())
     }
 
     /// What the user typed into a cell: the formula for a formula cell.
@@ -277,6 +294,34 @@ impl CalcApp {
             .ok()
             .and_then(|v| v.get(field).and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_default()
+    }
+
+    /// `text` (`cell.get`'s own `"text"` field) swapped for a Unicode
+    /// checkbox glyph when `cell`'s style is GridCraft's own
+    /// `"checkbox"` number-format sentinel (`insert.checkbox`'s doc:
+    /// "TRUE/FALSE and empty cells draw as checkboxes") — `None` for
+    /// every other cell, or a checkbox-formatted one whose value isn't
+    /// `TRUE`/`FALSE` (a plain number or text someone typed over it
+    /// still shows as itself, same as GridCraft's own egui grid). This
+    /// is the terminal-appropriate placeholder #20 asks for in place of
+    /// an actual checkbox widget: quadraui's `CellGrid` has no bespoke
+    /// one (CLAUDE.md: "use quadraui widgets; don't build widgets
+    /// here"), and plain `TRUE`/`FALSE` text is visible but reads as a
+    /// boolean cell, not a control to click.
+    fn checkbox_glyph(cell: &Value, text: &str) -> Option<String> {
+        let is_checkbox = cell
+            .get("style")
+            .and_then(|s| s.get("num_fmt"))
+            .and_then(Value::as_str)
+            == Some("checkbox");
+        if !is_checkbox {
+            return None;
+        }
+        match text {
+            "TRUE" => Some("☑".to_string()),
+            "FALSE" => Some("☐".to_string()),
+            _ => None,
+        }
     }
 
     pub fn cursor(&self) -> Address {
@@ -377,16 +422,45 @@ impl CalcApp {
     }
 
     /// The grid body's rect — the viewport minus the formula bar, the
-    /// status bar, the sheet-tabs strip, and the Name Manager sidebar
-    /// when it's open.
+    /// status bar, the sheet-tabs strip, the Name Manager sidebar when
+    /// it's open, and the chart panel when the active sheet has charts
+    /// to show.
     fn grid_rect(&self, backend: &dyn Backend) -> Rect {
-        Self::carve_tab_strip(self.content_bands(backend)).0
+        let grid = Self::carve_tab_strip(self.content_bands(backend)).0;
+        Self::carve_chart_panel(grid, self.view.charts.len()).0
     }
 
     /// The sheet-tabs strip's rect — narrowed the same way `grid_rect`
     /// is when the sidebar is open, so the strip never runs under it.
+    /// Not further narrowed for the chart panel: the tabs strip always
+    /// spans the full content width, with the chart panel (like the
+    /// cell grid above it) carved from what's left above it instead.
     fn tab_bar_rect(&self, backend: &dyn Backend) -> Rect {
         Self::carve_tab_strip(self.content_bands(backend)).1
+    }
+
+    /// `(cell grid rect, chart panel rect)`: with no charts to show,
+    /// `grid` passes through unchanged and the second rect is `None` —
+    /// the common case costs nothing. With at least one, a third of
+    /// `grid`'s own height (floored at 6 rows, and never more than
+    /// leaves the cell grid itself 4 rows) is carved off the bottom for
+    /// [`View::screen`] to push a `Surface::Chart` into, the same "one
+    /// more chrome band" carving `carve_tab_strip` already does for the
+    /// sheet-tabs strip.
+    fn carve_chart_panel(grid: Rect, chart_count: usize) -> (Rect, Option<Rect>) {
+        if chart_count == 0 {
+            return (grid, None);
+        }
+        let panel_h = (grid.height / 3.0)
+            .max(6.0)
+            .min((grid.height - 4.0).max(0.0));
+        if panel_h <= 0.0 {
+            return (grid, None);
+        }
+        let cells_h = grid.height - panel_h;
+        let cells = Rect::new(grid.x, grid.y, grid.width, cells_h);
+        let panel = Rect::new(grid.x, grid.y + cells_h, grid.width, panel_h);
+        (cells, Some(panel))
     }
 
     /// `Self::bands(backend)` with `grid` narrowed to leave room for
@@ -519,6 +593,12 @@ impl CalcApp {
     /// retitles the window/terminal (`backend.window()`), since it is
     /// the same "did a command just run" cue the rest of the view uses.
     fn refresh(&mut self, backend: &mut dyn Backend) {
+        // Resolved before `grid_rect` below reads `self.view.charts.len()`
+        // to size the cell-grid rect it carves a chart panel out of — a
+        // chart inserted this very frame must narrow that rect on the
+        // same frame, not lag one behind the panel `View::screen` paints
+        // it into once `self.view` is rebuilt further down.
+        self.view.charts = chart_view::charts(&mut self.session);
         let (row_height, col_width) = Self::cell_size(backend);
         self.grid.set_sizing(row_height, col_width);
         let rect = self.grid_rect(backend);
@@ -600,9 +680,15 @@ impl CalcApp {
             Vec::new()
         };
 
+        // Moved out rather than recomputed: the early assignment at the
+        // top of this function already resolved it against this frame's
+        // engine state, and `chart_view::charts` isn't cheap enough (one
+        // `sheet.read` per series) to pay for twice a frame.
+        let charts = std::mem::take(&mut self.view.charts);
         self.view = View {
             grid: Some(grid),
             tab_bar: Some(tab_bar),
+            charts,
             sidebar_names,
             selection_label,
             selection_stats,
@@ -668,7 +754,7 @@ impl Default for CalcApp {
 
 impl View {
     /// The whole screen as `ScreenLayout` surfaces, back to front:
-    /// formula bar, grid, status bar.
+    /// formula bar, grid, chart panel, tab strip, status bar.
     fn screen(&self, bands: Bands) -> ScreenLayout {
         let mut layout = ScreenLayout::new();
         layout.push(Surface::TextField {
@@ -676,11 +762,26 @@ impl View {
             tf: self.formula.clone(),
         });
         let (grid_rect, tab_bar_rect) = CalcApp::carve_tab_strip(bands);
+        let (cell_rect, chart_rect) = CalcApp::carve_chart_panel(grid_rect, self.charts.len());
         if let Some(grid) = &self.grid {
             layout.push(Surface::CellGrid {
-                rect: grid_rect,
+                rect: cell_rect,
                 grid: grid.clone(),
             });
+        }
+        // Stacked evenly within the carved-off panel — see
+        // `CalcApp::carve_chart_panel`'s own doc for why there's a rect
+        // here at all exactly when `self.charts` isn't empty.
+        if let Some(panel) = chart_rect {
+            let each = panel.height / self.charts.len() as f32;
+            for (i, chart) in self.charts.iter().enumerate() {
+                layout.push(Surface::Chart {
+                    rect: Rect::new(panel.x, panel.y + each * i as f32, panel.width, each),
+                    chart: chart.clone(),
+                    hovered_point: None,
+                    crosshair_x: None,
+                });
+            }
         }
         if let Some(bar) = &self.tab_bar {
             layout.push(Surface::TabBar {
@@ -1366,6 +1467,31 @@ mod tests {
             after.contains("1210.5") || after.contains("1,210.50"),
             "got {after}"
         );
+    }
+
+    /// #20: `insert.checkbox` already changed what the cell displays
+    /// (`TRUE`/`FALSE`, same as any boolean cell) before this glyph
+    /// swap existed — this asserts the swap itself, not that the
+    /// command is visible at all.
+    #[test]
+    fn a_checkbox_formatted_cell_shows_a_glyph_not_true_false() {
+        let mut app = CalcApp::new();
+        app.execute("insert.checkbox", json!({"range": "A1"}))
+            .unwrap();
+        assert_eq!(app.cell_text("A1"), "☐");
+        app.execute("cell.toggleCheckbox", json!({"cell": "A1"}))
+            .unwrap();
+        assert_eq!(app.cell_text("A1"), "☑");
+    }
+
+    /// A plain boolean cell — no checkbox formatting — keeps showing
+    /// the literal `TRUE`/`FALSE` text, confirming the glyph swap is
+    /// gated on the cell's own style, not just its boolean value.
+    #[test]
+    fn a_plain_boolean_cell_is_unaffected() {
+        let mut app = CalcApp::new();
+        app.set_cell("A1", "TRUE").unwrap();
+        assert_eq!(app.cell_text("A1"), "TRUE");
     }
 
     #[test]

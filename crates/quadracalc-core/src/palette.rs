@@ -91,10 +91,41 @@ fn classify(session: &Session, id: &str) -> (bool, Option<String>) {
     if crate::format_picker::has_picker(id) {
         return (true, None);
     }
+    // The opposite override: a row `unsuppliable_params` would leave
+    // enabled (every param really is optional) but that this app still
+    // has nothing to show for — see `no_terminal_surface`'s own doc.
+    if let Some(reason) = no_terminal_surface(id) {
+        return (false, Some(reason.to_string()));
+    }
     if let Some(fields) = unsuppliable_params(spec.params) {
         return (false, Some(format!("needs {fields}")));
     }
     (true, None)
+}
+
+/// Why `id` is disabled when it creates engine-side state this app's
+/// `CellGrid`-only terminal view has no surface for at all — `None` for
+/// every other id. Unlike `insert.table`/`insert.pivotTable`/
+/// `insert.checkbox` (plain cell content and formatting `CellGrid`
+/// already paints) or `insert.chart`/`insert.pivotChart` (wired to a
+/// `Surface::Chart` panel — `crate::chart_view`), each of these creates
+/// a *floating* object anchored at a point rather than inside a cell
+/// (a `Shape`/`Slicer`) or print-only state no view here ever renders
+/// (`pageLayout.headerFooter`), and quadraui has no floating-object
+/// widget to paint one with (CLAUDE.md: "If quadracalc needs a widget
+/// quadraui lacks, say so" — belongs upstream, not built here).
+/// Disabling honestly beats leaving a menu item that runs and changes
+/// nothing the user can see (#20).
+fn no_terminal_surface(id: &str) -> Option<&'static str> {
+    match id {
+        "insert.textBox" | "insert.wordArt" | "insert.slicer" => {
+            Some("no terminal surface yet: creates a floating object this view doesn't paint")
+        }
+        "pageLayout.headerFooter" => {
+            Some("no terminal surface yet: print-only, never shown in the grid view")
+        }
+        _ => None,
+    }
 }
 
 /// `None` when `params` (a `CommandSpec::params` doc string, e.g.
@@ -501,6 +532,55 @@ mod tests {
             "{:?}",
             open.disabled_reason
         );
+    }
+
+    /// #20: before `no_terminal_surface` existed, every one of these
+    /// classified as runnable — each catalog entry's own `params` doc
+    /// has every field optional — even though running one creates a
+    /// floating object or print-only state this app's grid view never
+    /// paints, so clicking the Insert menu item did nothing visible.
+    #[test]
+    fn floating_object_and_print_only_commands_are_disabled_with_a_reason() {
+        let s = session();
+        let all = entries(&s);
+        for id in [
+            "insert.textBox",
+            "insert.wordArt",
+            "insert.slicer",
+            "pageLayout.headerFooter",
+        ] {
+            let entry = all.iter().find(|e| e.id == id).expect(id);
+            assert!(!entry.enabled, "{id} should be disabled");
+            assert!(
+                entry
+                    .disabled_reason
+                    .as_deref()
+                    .unwrap()
+                    .contains("no terminal surface"),
+                "{id}: {:?}",
+                entry.disabled_reason
+            );
+        }
+    }
+
+    /// Chart/PivotChart/Table/PivotTable/Checkbox all paint through
+    /// `CellGrid` or the chart panel (`crate::chart_view`) — none of
+    /// them are the floating-object/print-only shape
+    /// `no_terminal_surface` disables, so they stay runnable.
+    #[test]
+    fn commands_with_a_grid_or_chart_render_path_stay_enabled() {
+        let s = session();
+        let all = entries(&s);
+        for id in [
+            "insert.table",
+            "insert.pivotTable",
+            "insert.chart",
+            "insert.pivotChart",
+            "insert.checkbox",
+        ] {
+            let entry = all.iter().find(|e| e.id == id).expect(id);
+            assert!(entry.enabled, "{id}: {:?}", entry.disabled_reason);
+        }
     }
 
     #[test]
