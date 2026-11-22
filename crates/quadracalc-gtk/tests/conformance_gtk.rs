@@ -56,3 +56,9 @@ fn gtk_open_formulas_menu_opens_function_picker() {
     let mut driver = GtkDriver::new(CalcApp::new(), W, H);
     scenarios::open_formulas_menu_opens_function_picker(&mut driver);
 }
+
+#[test]
+fn gtk_home_menu_has_grouped_submenus_with_shortcut_hints() {
+    let mut driver = GtkDriver::new(CalcApp::new(), W, H);
+    scenarios::home_menu_has_grouped_submenus_with_shortcut_hints(&mut driver);
+}

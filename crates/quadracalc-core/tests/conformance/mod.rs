@@ -244,3 +244,51 @@ pub fn open_formulas_menu_opens_function_picker<D: ConformanceDriver>(d: &mut D)
         "the Financial category should list its own real functions"
     );
 }
+
+/// Home's ~90 catalog placements are grouped into one
+/// `ContextMenuItem::submenu` per `Entry::group` instead of one long flat
+/// dropdown — open Home, confirm a group label (not one of its nested
+/// items) is what's on screen first, open that group's submenu and
+/// confirm a nested item is now visible, then switch to the Clipboard
+/// group and confirm its accelerator hint renders. `MenuSystem`'s submenu
+/// state machine is backend-neutral (same as [`open_menu_and_quit`]'s
+/// dispatch), so this runs against every driver, not just `TuiDriver`.
+/// Needs a blank `CalcApp::new()` as its fixture.
+pub fn home_menu_has_grouped_submenus_with_shortcut_hints<D: ConformanceDriver>(d: &mut D) {
+    assert!(
+        d.screen_has("Home"),
+        "the menu bar's own top-level labels should be visible before anything is clicked"
+    );
+
+    d.click_text("Home");
+    assert!(
+        d.screen_has("Font"),
+        "clicking Home should open its dropdown, with the \"Font\" group label visible"
+    );
+    assert!(
+        !d.screen_has("Bold"),
+        "\"Bold\" lives inside the Font submenu, not flat in the Home dropdown — it \
+         shouldn't be on screen before that submenu is opened"
+    );
+
+    d.click_text("Font");
+    assert!(
+        d.screen_has("Bold"),
+        "clicking the \"Font\" group should open its submenu, with \"Bold\" (a real \
+         catalog item) now visible"
+    );
+
+    // Switching to another top-level group closes Font's submenu and
+    // opens Clipboard's — "Copy" is one of the few Home ids with a
+    // working keyboard shortcut (`shortcut_for` in `crate::menu`), so its
+    // row should show the rendered accelerator hint alongside the label.
+    d.click_text("Clipboard");
+    assert!(
+        d.screen_has("Copy"),
+        "clicking the \"Clipboard\" group should open its own submenu"
+    );
+    assert!(
+        d.screen_has("Ctrl+C"),
+        "\"Copy\" should show its Ctrl+C key_equivalent hint in the dropdown"
+    );
+}
