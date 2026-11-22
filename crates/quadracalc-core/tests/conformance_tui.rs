@@ -55,3 +55,9 @@ fn tui_open_formulas_menu_opens_function_picker() {
     let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
     scenarios::open_formulas_menu_opens_function_picker(&mut driver);
 }
+
+#[test]
+fn tui_home_menu_has_grouped_submenus_with_shortcut_hints() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
+    scenarios::home_menu_has_grouped_submenus_with_shortcut_hints(&mut driver);
+}
