@@ -262,13 +262,10 @@ fn ctrl_v_through_dispatch_pastes_a_copied_formula_with_adjusted_references() {
     // `dispatch_event` arms the engine's own clipboard, then a real
     // Ctrl+V — also through `dispatch_event`, quadraui's full
     // backend-translation + preprocessing pipeline, not a direct
-    // `CalcApp::execute("edit.paste", …)` call — reaches
-    // `CellGridController::handle`'s `UiEvent::ClipboardPaste` arm,
-    // which reports `CellGridControllerEvent::PasteRequested` for
-    // `CalcApp::apply_controller_event` to turn into `edit.paste`. This
-    // is the exact path that was unreachable before: the system
-    // clipboard this process actually has (headless, no
-    // `DISPLAY`/`WAYLAND_DISPLAY`) never reads back what it wrote, so
+    // `CalcApp::execute("edit.paste", …)` call — reaches `CalcApp::handle`'s
+    // own `UiEvent::ClipboardPaste` arm, which turns it into `edit.paste`
+    // directly. The system clipboard this process actually has (headless,
+    // no `DISPLAY`/`WAYLAND_DISPLAY`) never reads back what it wrote, so
     // `UiEvent::ClipboardPaste` is injected directly with the text the
     // copy produced — standing in for "the OS clipboard round-tripped
     // it", which `crate::clipboard`'s non-blocking concern about
@@ -305,6 +302,36 @@ fn ctrl_v_through_dispatch_pastes_a_copied_formula_with_adjusted_references() {
     assert_eq!(driver.app_mut().cell_text("B5"), "0");
     // The source is untouched by a copy, same as the core-level test.
     assert_eq!(driver.app_mut().cell_input("B1"), "=A1*2");
+}
+
+#[test]
+fn clipboard_paste_while_editing_inserts_into_the_edit_buffer_instead_of_committing() {
+    // A paste that arrives mid-edit (continuing a formula built up by
+    // typing) must insert into that edit's own buffer, the same as a
+    // character typed by hand — not fall through to the idle `edit.paste`
+    // path, which commits over the whole selection and would discard
+    // whatever had been typed so far.
+    let mut app = CalcApp::new();
+    let mut b = backend();
+    app.setup(&mut b);
+
+    press_named(&mut app, &mut b, NamedKey::F(2));
+    app.handle(
+        UiEvent::KeyPressed {
+            key: Key::Char('X'),
+            modifiers: Modifiers::default(),
+            repeat: false,
+        },
+        &mut b,
+    );
+    app.handle(UiEvent::ClipboardPaste("Y".to_string()), &mut b);
+
+    assert_eq!(app.view().formula.value, "XY");
+    // Nothing has reached the engine yet — the edit is still live.
+    assert_eq!(app.cell_text("A1"), "");
+
+    press_named(&mut app, &mut b, NamedKey::Enter);
+    assert_eq!(app.cell_text("A1"), "XY");
 }
 
 /// Menu/palette Paste (`clipboard::paste_from_system`, issue #38) over a
