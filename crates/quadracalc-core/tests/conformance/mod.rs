@@ -126,6 +126,66 @@ pub fn copy_cut_paste<D: ConformanceDriver + DriverInput>(d: &mut D) {
     );
 }
 
+/// Cut a cell, paste it elsewhere, and confirm the source is cleared —
+/// the cut leg `copy_cut_paste` never exercised (issue #50; that
+/// scenario's own doc above only covers copy). `tests/clipboard.rs`'s own
+/// `cut_clears_the_source_and_keeps_the_formula_unshifted_at_the_destination`
+/// drives the same engine behaviour directly against `CalcApp::execute`;
+/// this is its black-box counterpart through the real Ctrl+X keyboard
+/// path and a synthetic `ClipboardPaste` dispatch, the same stand-in
+/// `copy_cut_paste` uses for "the OS clipboard round-tripped it". Needs a
+/// blank `CalcApp::new()` as its fixture.
+///
+/// Excel semantics: `edit.cut` only arms the engine's clipboard — the
+/// source isn't cleared until the paste lands elsewhere (see
+/// `crate::clipboard::cut`'s own doc), so the source must still be
+/// readable right after Ctrl+X and only disappear once pasted.
+///
+/// The destination keeps the source's own screen text (cut doesn't
+/// adjust it the way copy adjusts a relative reference), so `screen_has`
+/// alone can't tell "source cleared" from "source still there, counted
+/// twice" — both the destination's grid cell and, were the source still
+/// selected, its own formula-bar echo would contain the same text. The
+/// scenario instead moves the selection *back* to the source after
+/// pasting and asserts `count` is exactly one: the source cell and its
+/// own formula-bar echo both go silent once cleared, leaving only the
+/// (now unselected) destination's grid cell behind.
+pub fn cut_paste<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    d.type_text("77");
+    ConformanceDriver::press_named(d, NamedKey::Enter); // commits A1=77, moves to A2
+    ConformanceDriver::press_named(d, NamedKey::Up); // back to A1
+    assert!(
+        d.screen_has("77"),
+        "A1 should show its value before cutting"
+    );
+
+    ConformanceDriver::ctrl_char(d, 'x');
+    assert!(
+        d.screen_has("77"),
+        "Ctrl+X only arms the clipboard — the source isn't cleared until the paste lands"
+    );
+
+    for _ in 0..4 {
+        ConformanceDriver::press_named(d, NamedKey::Down); // A1 -> A5
+    }
+    d.dispatch(UiEvent::ClipboardPaste("77".to_string()));
+    assert!(
+        d.screen_has("77"),
+        "pasting the cut value should land it at the destination (A5)"
+    );
+
+    for _ in 0..4 {
+        ConformanceDriver::press_named(d, NamedKey::Up); // A5 -> A1, the source
+    }
+    assert_eq!(
+        d.inventory().count("77"),
+        1,
+        "once pasted, the source cell (now selected, so with no formula-bar echo of its \
+         own either) should be the only place \"77\" went quiet — the one remaining \
+         occurrence is the destination's grid cell"
+    );
+}
+
 /// Insert a sheet, confirm the view switches to it, then click back to
 /// the first sheet's tab by its painted label — `tests/sheets.rs`'s own
 /// `tui_driver_clicking_a_tab_switches_the_visible_sheet`, lifted to run

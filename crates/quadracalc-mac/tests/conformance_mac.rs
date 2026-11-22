@@ -54,6 +54,12 @@ fn mac_copy_cut_paste() {
 }
 
 #[test]
+fn mac_cut_paste() {
+    let mut driver = MacDriver::new(CalcApp::new(), W, H);
+    scenarios::cut_paste(&mut driver);
+}
+
+#[test]
 fn mac_switch_sheets() {
     let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), W, H);
     scenarios::switch_sheets(&mut driver);
