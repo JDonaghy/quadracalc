@@ -10,6 +10,7 @@
 mod address;
 pub mod agent;
 mod app;
+mod chart_view;
 mod clipboard;
 pub mod format_picker;
 mod formula_bar;
