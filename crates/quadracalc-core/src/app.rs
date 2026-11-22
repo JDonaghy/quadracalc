@@ -640,10 +640,7 @@ impl CalcApp {
             return format!("Count: {count}");
         }
         let sum = stats.get("sum").and_then(Value::as_f64).unwrap_or(0.0);
-        let average = stats
-            .get("average")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
+        let average = stats.get("average").and_then(Value::as_f64).unwrap_or(0.0);
         format!(
             "Average: {}   Count: {count}   Sum: {}",
             Self::format_stat_number(average),
