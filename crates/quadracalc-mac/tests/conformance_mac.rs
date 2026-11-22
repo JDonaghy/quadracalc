@@ -58,3 +58,15 @@ fn mac_switch_sheets() {
     let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), W, H);
     scenarios::switch_sheets(&mut driver);
 }
+
+#[test]
+fn mac_open_menu_and_quit() {
+    let mut driver = MacDriver::new(CalcApp::new(), W, H);
+    scenarios::open_menu_and_quit(&mut driver);
+}
+
+#[test]
+fn mac_open_formulas_menu_opens_function_picker() {
+    let mut driver = MacDriver::new(CalcApp::new(), W, H);
+    scenarios::open_formulas_menu_opens_function_picker(&mut driver);
+}
