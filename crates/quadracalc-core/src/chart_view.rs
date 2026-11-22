@@ -1,11 +1,11 @@
 //! Insert › Charts/PivotChart: turns the active sheet's own GridCraft
 //! `Chart`s into quadraui [`Chart`] primitives so [`crate::app::View::screen`]
-//! can push them as `Surface::Chart`, the same way it already pushes
-//! `Surface::CellGrid`/`TabBar` (see `app.rs`'s module doc). Before this
-//! module existed, `insert.chart`/`insert.pivotChart` ran fine against the
-//! engine — the command surface never needed a parameter this app
-//! couldn't supply — but nothing ever painted the result: #20 is this
-//! gap.
+//! can push them as `Surface::Chart`, the same way it already pushes the
+//! cell grid as `Surface::Widget`/`TabBar` (see `app.rs`'s module doc).
+//! Before this module existed, `insert.chart`/`insert.pivotChart` ran
+//! fine against the engine — the command surface never needed a
+//! parameter this app couldn't supply — but nothing ever painted the
+//! result: #20 is this gap.
 //!
 //! The chart list itself is a plain read of `Session::doc` (same
 //! "structural view data" exception `crate::sheets` documents), but each

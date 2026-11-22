@@ -1,7 +1,6 @@
 //! The formula bar: a [`TextField`] mirroring the cursor cell's raw
-//! input, stacked above the [`CellGrid`] band. Reuses
-//! `CellGridController::sync_formula_bar`/`handle_formula_bar_key`
-//! (quadraui#2728) so a formula bar edit and the grid's own in-cell
+//! input, stacked above the [`CellGrid`] band. Mirrors [`CellGrid::editing`]
+//! (quadraui#2918/#2920) so a formula bar edit and the grid's own in-cell
 //! editor are always the same in-progress edit — see
 //! `quadraui`'s `examples/common/cell_grid_demo.rs` for the reference
 //! shape this mirrors.
@@ -11,7 +10,7 @@
 //! `Backend` at all — the same reasoning
 //! `CalcApp::resolve_cell_size` already follows.
 
-use quadraui::{CellGridController, Rect, TextField, WidgetId};
+use quadraui::{CellGrid, Rect, TextField, WidgetId};
 
 /// The three stacked bands this app paints into, top to bottom: the
 /// formula bar, the `CellGrid` body, and the status bar. A pure function
@@ -45,19 +44,28 @@ pub fn bands(width: f32, height: f32, line_height: f32) -> Bands {
 
 /// Build this frame's formula-bar [`TextField`]: seeded with `raw_input`
 /// (the cursor cell's current raw text, from `cell.get`'s `input`
-/// field), then [`CellGridController::sync_formula_bar`] overwrites
-/// `value`/`cursor`/`selection_anchor` with the in-progress edit's own
-/// buffer whenever one is active — so the field shows the live edit
-/// while typing (through either the grid or the bar itself) and the
-/// committed raw text otherwise. `focused` is `true` only while the
-/// formula bar itself (not the grid) owns the caret — see
-/// `CalcApp::formula_focused`'s own doc.
-pub fn build_field(raw_input: &str, grid: &CellGridController, focused: bool) -> TextField {
+/// field), then overwritten with [`CellGrid::editing`]'s own
+/// `text`/`cursor`/`selection_anchor` whenever an edit is active — so
+/// the field shows the live edit while typing (through either the grid
+/// or the bar itself) and the committed raw text otherwise. `focused` is
+/// `true` only while the formula bar itself (not the grid) owns the
+/// caret — see `CalcApp::formula_focused`'s own doc.
+pub fn build_field(raw_input: &str, grid: &CellGrid, focused: bool) -> TextField {
     let mut field = TextField::new(WidgetId::new("quadracalc-formula-bar"))
         .with_placeholder("Formula")
         .with_value(raw_input)
         .with_has_focus(focused);
-    grid.sync_formula_bar(&mut field);
+    match &grid.editing {
+        Some(edit) => {
+            field.value = edit.text.clone();
+            field.cursor = Some(edit.cursor);
+            field.selection_anchor = edit.selection_anchor;
+        }
+        None => {
+            field.cursor = None;
+            field.selection_anchor = None;
+        }
+    }
     field
 }
 
@@ -93,7 +101,7 @@ mod tests {
 
     #[test]
     fn field_mirrors_the_cursor_cells_raw_input_when_not_editing() {
-        let grid = CellGridController::new("grid");
+        let grid = CellGrid::new(WidgetId::new("grid"));
         let field = build_field("=SUM(A1:A5)", &grid, false);
         assert_eq!(field.value, "=SUM(A1:A5)");
         assert!(!field.has_focus);
@@ -102,9 +110,17 @@ mod tests {
 
     #[test]
     fn field_shows_the_live_edit_buffer_while_editing() {
-        let mut grid = CellGridController::new("grid");
-        grid.set_dimensions(5, 5);
-        grid.start_editing("=OLD");
+        use quadraui::primitives::cell_grid::CellEditState;
+
+        let mut grid = CellGrid::new(WidgetId::new("grid"));
+        grid.row_count = 5;
+        grid.col_count = 5;
+        grid.editing = Some(CellEditState {
+            text: "=OLD".to_string(),
+            cursor: "=OLD".len(),
+            selection_anchor: None,
+            placeholder: None,
+        });
         let field = build_field("=OLD", &grid, true);
         assert_eq!(field.value, "=OLD");
         assert!(field.has_focus);

@@ -12,14 +12,17 @@ publish = false
 
 [workspace.dependencies]
 # quadraui is pinned to a develop revision until 0.12 is published, because
-# CellGrid (quadraui#2732) only exists on develop. Switch to `quadraui = "0.12"`
-# once it's released.
-quadraui = { git = "https://github.com/JDonaghy/quadraui", rev = "cb0341298181e6774587a4f19139ba67da62286c", default-features = false }
+# CellGrid (quadraui#2732) only exists on develop. Past quadraui#2918/#2920
+# CellGrid is a widget-contract `Interactive` primitive reached through
+# `Surface::Widget`, not a bespoke `Surface::CellGrid` variant — see
+# `quadracalc-core::app`'s module doc. Switch to `quadraui = "0.12"` once
+# it's released.
+quadraui = { git = "https://github.com/JDonaghy/quadraui", rev = "c67950d780a80685e87b678c5241328d09e907aa", default-features = false }
 # Same repo/revision as `quadraui` above: the MCP server that turns a
 # running quadraui app's backend-neutral control channel into stdio/
 # Unix-socket `snapshot`/`act`/`key`/`type` tools, plus one tool per
 # app-defined Level 2 command (see `quadraui::control`'s "Levels" doc).
-quadraui-mcp = { git = "https://github.com/JDonaghy/quadraui", rev = "cb0341298181e6774587a4f19139ba67da62286c" }
+quadraui-mcp = { git = "https://github.com/JDonaghy/quadraui", rev = "c67950d780a80685e87b678c5241328d09e907aa" }
 # GridCraft's engine, used unchanged and pinned by full SHA. Never fork it;
 # upstream any fix to storytold/gridcraft instead.
 gridcraft-engine = { git = "https://github.com/storytold/gridcraft", rev = "3b062063270e37c6f8c1fcbfb2ea206e6d1f868b" }

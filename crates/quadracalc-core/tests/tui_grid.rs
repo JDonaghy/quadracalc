@@ -1,8 +1,8 @@
 //! Black-box test for `CalcApp`'s `CellGrid`: drives it through quadraui's
 //! `TuiDriver` (real production render + dispatch path, headless
 //! `TestBackend`) and asserts on what's actually painted, not just on
-//! `CellGridController`'s own state (see `crates/quadracalc-core/src/app.rs`
-//! for the unit tests covering that).
+//! `CellGrid`'s own state (see `crates/quadracalc-core/src/app.rs` for
+//! the unit tests covering that).
 
 use quadraui::tui::testing::TuiDriver;
 use quadraui::{Key, Modifiers, NamedKey, UiEvent};

@@ -10,15 +10,14 @@
 //! This module only ever *reads* `Session::doc` to turn whatever the
 //! engine currently holds into a [`TabBar`] — see [`tab_bar`].
 //!
-//! The one thing it adds on top is [`SheetCursors`]: a
-//! `CellGridController`'s cursor/selection/scroll is this app's own
-//! state, not the engine's (the engine's own per-sheet `sheet_selections`
-//! is a different thing — the selection formulas resolve against, not
-//! the UI's own grid widget), so switching sheets and back has to save
-//! and restore it here.
+//! The one thing it adds on top is [`SheetCursors`]: a `CellGrid`'s
+//! cursor/selection/scroll is this app's own state, not the engine's
+//! (the engine's own per-sheet `sheet_selections` is a different thing —
+//! the selection formulas resolve against, not the UI's own grid widget),
+//! so switching sheets and back has to save and restore it here.
 
 use gridcraft_engine::Session;
-use quadraui::{CellGridController, TabBar, TabItem, WidgetId};
+use quadraui::{CellGrid, TabBar, TabItem, WidgetId};
 
 /// Sheet names in workbook order, exactly as the engine has them — empty
 /// with no document open yet.
@@ -87,9 +86,9 @@ pub fn tab_bar(session: &Session, scroll_offset: usize) -> TabBar {
     }
 }
 
-/// A [`CellGridController`]'s cursor/selection/scroll — the whole slice
-/// of its state that's specific to one sheet, snapshotted on the way out
-/// of a sheet and written back on the way into one.
+/// A [`CellGrid`]'s cursor/selection/scroll — the whole slice of its
+/// state that's specific to one sheet, snapshotted on the way out of a
+/// sheet and written back on the way into one.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CursorMemory {
     cursor: (usize, usize),
@@ -100,19 +99,21 @@ pub struct CursorMemory {
 
 impl CursorMemory {
     /// Snapshot `grid`'s current state.
-    pub fn capture(grid: &CellGridController) -> Self {
+    pub fn capture(grid: &CellGrid) -> Self {
         Self {
-            cursor: grid.cursor(),
-            anchor: grid.selection_anchor(),
-            row_scroll: grid.row_scroll(),
-            col_scroll: grid.col_scroll(),
+            cursor: grid.cursor,
+            anchor: grid.selection_anchor,
+            row_scroll: grid.row_scroll,
+            col_scroll: grid.col_scroll,
         }
     }
 
     /// Write this state back onto `grid`.
-    pub fn restore(&self, grid: &mut CellGridController) {
-        grid.set_selection(self.cursor, self.anchor);
-        grid.set_scroll(self.row_scroll, self.col_scroll);
+    pub fn restore(&self, grid: &mut CellGrid) {
+        grid.cursor = self.cursor;
+        grid.selection_anchor = self.anchor;
+        grid.row_scroll = self.row_scroll;
+        grid.col_scroll = self.col_scroll;
     }
 }
 
@@ -122,8 +123,8 @@ impl CursorMemory {
 /// lookup can't land on the wrong sheet the way an index-keyed one
 /// could. A sheet with no entry (never visited yet this session, or
 /// renamed since) gets [`CursorMemory::default`]: cursor at the origin,
-/// no selection, no scroll — the same place a brand new
-/// `CellGridController` starts.
+/// no selection, no scroll — the same place a brand new `CellGrid`
+/// starts.
 #[derive(Debug, Default)]
 pub struct SheetCursors(std::collections::HashMap<String, CursorMemory>);
 

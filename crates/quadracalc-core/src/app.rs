@@ -10,20 +10,33 @@
 //! through `ScreenLayout`, quadraui's canonical path, which is also what
 //! makes the screen visible to the accessibility tree and agents.
 //!
-//! The grid itself is a [`CellGridController`]-driven [`CellGrid`] —
-//! quadraui's spreadsheet primitive (quadraui#2732). The controller owns
-//! cursor/selection/scroll/frozen-pane state; this app owns cell content
-//! and reads only the window [`CellGridController::layout`] reports is on
-//! screen, never the whole sheet.
+//! The grid itself is [`CellGrid`] — quadraui's spreadsheet primitive
+//! (quadraui#2732), a widget-contract [`Interactive`] widget reached
+//! through `Surface::Widget` rather than a bespoke `Surface::CellGrid`
+//! variant (quadraui#2918/#2920). It owns cursor/selection/scroll/
+//! frozen-pane/in-progress-edit state as plain fields a host rebuilds
+//! every frame; this app owns cell content and reads only the window
+//! [`CellGrid::layout`] reports is on screen, never the whole sheet.
+//! `Interactive::handle` only ever has `&self` (see that trait's own
+//! doc), so every navigation/edit outcome comes back as a
+//! [`CellGridEvent`] for [`CalcApp::apply_grid_event`] to write onto
+//! `self.grid`'s fields, rather than the grid mutating itself in place —
+//! `Self::dispatch_to_grid` is this app's own hand-rolled routing into
+//! it, mirroring quadraui's own `examples/common/cell_grid_demo.rs`.
 
 use gridcraft_engine::catalog::CATALOG;
 use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
+use quadraui::interactive::SubTarget;
+use quadraui::primitive::{LayoutCtx, Primitive, Units};
+use quadraui::primitives::cell_grid::CellEditState;
 use quadraui::{
-    AppLogic, Backend, Cell, CellGrid, CellGridController, CellGridControllerEvent, CellStyle,
-    Chart, Color, Key, ListViewHit, MenuEvent, MenuSystem, Modifiers, MouseButton, NamedKey, Point,
-    Reaction, Rect, ScreenLayout, SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar,
-    TabBarHit, TextField, UiEvent, WidgetId, resolve_bar_height,
+    AppLogic, Backend, ButtonMask, Cell, CellGrid, CellGridEvent, CellGridPrimitiveLayout,
+    CellGridState, CellStyle, Chart, Color, EditOp, EventCx, EventHost, Handled, Interactive, Key,
+    KeyEvent, ListViewHit, MenuEvent, MenuSystem, Modifiers, MouseButton, NamedKey, Point,
+    PointerKind, PointerShape, Reaction, Rect, RoutedEvent, ScreenLayout, SidebarPanelHit,
+    StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent, WidgetId,
+    resolve_bar_height,
 };
 use serde_json::{Value, json};
 
@@ -48,7 +61,11 @@ const COL_COUNT: usize = 50;
 
 pub struct CalcApp {
     session: Session,
-    grid: CellGridController,
+    grid: CellGrid,
+    /// [`CellGrid`]'s own [`Interactive::State`] — the in-progress
+    /// mouse-drag anchor, the one piece of interaction state with no
+    /// `CellGrid` field of its own (see that type's own doc).
+    grid_state: CellGridState,
     /// Last engine error, shown in the status bar until the next action.
     error: Option<String>,
     view: View,
@@ -62,7 +79,7 @@ pub struct CalcApp {
     /// `false` when no edit is active; set by a click on the formula
     /// bar, cleared the moment that edit commits or cancels (from
     /// either the bar or the grid), since both end the one shared edit
-    /// `CellGridController` tracks (see its module doc).
+    /// `CellGrid::editing` tracks.
     formula_focused: bool,
     /// The command palette's state while it's open (Ctrl+Shift+P, or
     /// `:` on a TUI-shaped backend); `None` the rest of the time. While
@@ -93,10 +110,10 @@ pub struct CalcApp {
     /// get a backend, so it refreshes here instead — see that impl's
     /// own comment.
     agent_refresh_pending: bool,
-    /// Every sheet's own `CellGridController` cursor/selection/scroll,
-    /// so switching sheets and back restores exactly where the user left
-    /// off — see `crate::sheets`'s module doc for why this lives here
-    /// rather than in the engine.
+    /// Every sheet's own `CellGrid` cursor/selection/scroll, so switching
+    /// sheets and back restores exactly where the user left off — see
+    /// `crate::sheets`'s module doc for why this lives here rather than
+    /// in the engine.
     sheet_cursors: sheets::SheetCursors,
     /// The sheet-tabs strip's own scroll offset — the app's half of the
     /// `TabBar` backend contract (`quadraui::TabBar::layout`'s doc): the
@@ -122,8 +139,8 @@ pub struct CalcApp {
 pub struct View {
     /// The fully-built grid for this frame — geometry plus the windowed
     /// cell text the engine supplied for exactly the rows/columns
-    /// `CellGridController::layout` reported as visible. `None` only
-    /// before the first `setup`/`handle` call ever runs.
+    /// `CellGrid::layout` reported as visible. `None` only before the
+    /// first `setup`/`handle` call ever runs.
     pub grid: Option<CellGrid>,
     /// This frame's sheet tabs — the engine's own sheet list, rebuilt by
     /// `crate::sheets::tab_bar` on every `refresh`. `None` only before
@@ -168,12 +185,15 @@ impl CalcApp {
     pub fn new() -> Self {
         let mut session = Session::new();
         session.new_workbook();
-        let mut grid = CellGridController::new("quadracalc-grid");
-        grid.set_dimensions(ROW_COUNT, COL_COUNT);
+        let mut grid = CellGrid::new(WidgetId::new("quadracalc-grid"));
+        grid.row_count = ROW_COUNT;
+        grid.col_count = COL_COUNT;
+        grid.has_focus = true;
         let menu_system = MenuSystem::new(menu::menus(&session));
         Self {
             session,
             grid,
+            grid_state: CellGridState::default(),
             error: None,
             view: View::default(),
             last_title: None,
@@ -424,18 +444,18 @@ impl CalcApp {
     }
 
     pub fn cursor(&self) -> Address {
-        let (row, col) = self.grid.cursor();
+        let (row, col) = self.grid.cursor;
         Address::new(row as u32, col as u32)
     }
 
     /// The current selection's top-left corner — a single cell's own
     /// cursor for a one-cell selection, otherwise the same corner
-    /// `CellGridControllerEvent::PasteRequested`'s `anchor_row`/
-    /// `anchor_col` already resolves for a Ctrl+V paste (see that
-    /// event's own doc). `clipboard::paste_from_system` targets this,
-    /// not [`Self::cursor`], so a menu-triggered paste lands on the
-    /// same cell Ctrl+V would for the identical selection — the cursor
-    /// alone can sit at any corner of a Shift-extended selection.
+    /// `CalcApp::handle`'s own `UiEvent::ClipboardPaste` arm already
+    /// resolves for a Ctrl+V paste. `clipboard::paste_from_system`
+    /// targets this, not [`Self::cursor`], so a menu-triggered paste
+    /// lands on the same cell Ctrl+V would for the identical selection —
+    /// the cursor alone can sit at any corner of a Shift-extended
+    /// selection.
     pub fn selection_anchor(&self) -> Address {
         let (top, left, _, _) = self.grid.selection_bounds();
         Address::new(top as u32, left as u32)
@@ -492,8 +512,8 @@ impl CalcApp {
         Ok(())
     }
 
-    /// Push the UI's own cursor/selection (`CellGridController`, which the
-    /// engine never sees) into the engine's `doc().selection` via
+    /// Push the UI's own cursor/selection (`CellGrid`, which the engine
+    /// never sees) into the engine's `doc().selection` via
     /// `selection.set`, so a command run with no explicit `range`/`cell`
     /// (every palette run, `edit.undo`/`edit.redo`) resolves against what
     /// the user actually has selected instead of the engine's own
@@ -529,19 +549,19 @@ impl CalcApp {
     }
 
     /// Types `name` plus `()` into whatever edit is active — through
-    /// `CellGridController::handle_formula_bar_key`, the same per-
-    /// character path a user's own typing takes, so the caret ends up
-    /// right after the closing paren exactly like it would after typing
-    /// the call by hand. If nothing is being edited yet, opens one on
-    /// the formula bar first: seeded with the cursor cell's own raw text
-    /// when that's already a formula (so picking a function from an
-    /// existing one appends a nested call instead of discarding it), or
-    /// with a bare `=` otherwise — same "a name starts the formula"
-    /// convention `gridcraft_engine`'s own `formulas.insertFunction`
-    /// follows for a supplied `name` (`={name}(`), just typed through
-    /// the caret instead of replacing the cell outright.
+    /// [`Self::type_key_into_grid`], the same per-character path a
+    /// user's own typing takes, so the caret ends up right after the
+    /// closing paren exactly like it would after typing the call by
+    /// hand. If nothing is being edited yet, opens one on the formula
+    /// bar first: seeded with the cursor cell's own raw text when that's
+    /// already a formula (so picking a function from an existing one
+    /// appends a nested call instead of discarding it), or with a bare
+    /// `=` otherwise — same "a name starts the formula" convention
+    /// `gridcraft_engine`'s own `formulas.insertFunction` follows for a
+    /// supplied `name` (`={name}(`), just typed through the caret
+    /// instead of replacing the cell outright.
     fn insert_function_call(&mut self, name: &str, backend: &mut dyn Backend) {
-        if !self.grid.is_editing() {
+        if self.grid.editing.is_none() {
             let a1 = self.cursor().a1();
             let existing = self.cell_input(&a1);
             let seed = if existing.starts_with('=') {
@@ -549,14 +569,45 @@ impl CalcApp {
             } else {
                 "=".to_string()
             };
-            self.grid.start_editing(seed);
+            self.start_editing(seed);
             self.formula_focused = true;
         }
-        let rect = Self::bands(backend).formula;
         for c in format!("{}()", name.to_ascii_uppercase()).chars() {
-            self.grid
-                .handle_formula_bar_key(&Key::Char(c), &Modifiers::default(), backend, rect);
+            self.type_key_into_grid(Key::Char(c), backend);
         }
+    }
+
+    /// Open an edit on `self.grid.cursor`, seeded with `text` and the
+    /// caret at its end — `CellGrid` has no cell content to seed itself
+    /// with (see its module doc), so every edit-opening path (F2, a
+    /// plain keypress, a formula-bar click, [`Self::insert_function_call`])
+    /// funnels through this one place to build the [`CellEditState`].
+    fn start_editing(&mut self, text: String) {
+        let cursor = text.len();
+        self.grid.editing = Some(CellEditState {
+            text,
+            cursor,
+            selection_anchor: None,
+            placeholder: None,
+        });
+    }
+
+    /// Route one synthetic key into the grid's own [`CellGrid::handle`]
+    /// via [`Self::dispatch_to_grid`] and apply whatever
+    /// [`CellGridEvent`] it reports — the same per-character path a
+    /// user's own typing takes, used where this app types on the grid's
+    /// behalf ([`Self::insert_function_call`]) rather than in response
+    /// to a real `UiEvent::KeyPressed`.
+    fn type_key_into_grid(&mut self, key: Key, backend: &mut dyn Backend) -> Reaction {
+        let rect = self.grid_rect(backend);
+        let layout = Self::grid_layout(&self.grid, backend, rect);
+        let units = Self::layout_ctx(backend).units();
+        let routed = RoutedEvent::Key(KeyEvent {
+            key,
+            modifiers: Modifiers::default(),
+            repeat: false,
+        });
+        self.dispatch_to_grid(routed, &layout, units)
     }
 
     pub fn view(&self) -> &View {
@@ -748,9 +799,9 @@ impl CalcApp {
         backend.chrome_line_height() <= 1.0
     }
 
-    /// `(row_height, col_width)` to hand `CellGridController::set_sizing`,
-    /// derived from the backend's own chrome metrics. `CellGrid`'s
-    /// `default_row_height`/`default_col_width` are raw surface-native
+    /// `(row_height, col_width)` to write onto `CellGrid::default_row_height`/
+    /// `CellGrid::default_col_width`, derived from the backend's own
+    /// chrome metrics. Those fields are raw surface-native
     /// units — cells on TUI, pixels everywhere else — so a pixel backend
     /// must pick real pixel sizes itself rather than inherit the
     /// TUI-shaped `1.0`/`8.0` constructor defaults, which would make
@@ -787,10 +838,10 @@ impl CalcApp {
 
     /// Re-read exactly the visible window from the engine and rebuild
     /// `self.view` — called from `setup` and every `handle`, which are the
-    /// only places with a `backend` to resolve
-    /// `CellGridController::layout` against. Also the one place that
-    /// retitles the window/terminal (`backend.window()`), since it is
-    /// the same "did a command just run" cue the rest of the view uses.
+    /// only places with a `backend` to resolve `CellGrid::layout` against.
+    /// Also the one place that retitles the window/terminal
+    /// (`backend.window()`), since it is the same "did a command just
+    /// run" cue the rest of the view uses.
     fn refresh(&mut self, backend: &mut dyn Backend) {
         // Resolved before `grid_rect` below reads `self.view.charts.len()`
         // to size the cell-grid rect it carves a chart panel out of — a
@@ -799,9 +850,10 @@ impl CalcApp {
         // it into once `self.view` is rebuilt further down.
         self.view.charts = chart_view::charts(&mut self.session);
         let (row_height, col_width) = Self::cell_size(backend);
-        self.grid.set_sizing(row_height, col_width);
+        self.grid.default_row_height = row_height;
+        self.grid.default_col_width = col_width;
         let rect = self.grid_rect(backend);
-        let layout = self.grid.layout(backend, rect).layout;
+        let layout = Self::grid_layout(&self.grid, backend, rect).layout;
         let cells: Vec<Vec<Cell>> = layout
             .rows
             .iter()
@@ -813,7 +865,17 @@ impl CalcApp {
                     .collect()
             })
             .collect();
-        let grid = self.grid.grid(cells);
+        // `row_scroll`/`col_scroll` are ranks *past* the frozen prefix,
+        // but `loaded_row_start`/`loaded_col_start` are absolute sheet
+        // indices (see `CellGrid::cells_window`'s doc) — add the frozen
+        // count back so the two conventions agree. Mirrors quadraui's own
+        // `examples/common/cell_grid_demo.rs::CellGridDemo::render`.
+        self.grid.loaded_row_start =
+            self.grid.frozen_rows.min(self.grid.row_count) + self.grid.row_scroll;
+        self.grid.loaded_col_start =
+            self.grid.frozen_cols.min(self.grid.col_count) + self.grid.col_scroll;
+        self.grid.cells = cells;
+        let grid = self.grid.clone();
 
         let a1 = self.cursor().a1();
         let (top, left, bottom, right) = self.grid.selection_bounds();
@@ -832,7 +894,7 @@ impl CalcApp {
         let formula = formula_bar::build_field(&active_input, &self.grid, self.formula_focused);
 
         // `selection.stats` reads the engine's own `d.selection.ranges`,
-        // not the grid controller's — `sync_selection` is what normally
+        // not `self.grid`'s own — `sync_selection` is what normally
         // keeps those two in step for palette/clipboard commands (see its
         // own doc), and the status bar needs it just as much, every
         // frame, so it doesn't report last frame's selection or default
@@ -954,6 +1016,54 @@ impl Default for CalcApp {
     }
 }
 
+/// [`EventHost`] impl backing `CalcApp`'s own hand-rolled dispatch into
+/// [`CellGrid::handle`] (`CalcApp::dispatch_to_grid`) — mirrors
+/// quadraui's own `examples/common/cell_grid_demo.rs::DemoHost`: this app
+/// has no hit-test/focus-cycling router of its own for `request_focus`/
+/// `capture_pointer`/`release_pointer`/`set_cursor`/`request_redraw` to
+/// report back to (every event `dispatch_to_grid` is handed has already
+/// been resolved to belong to the grid by `CalcApp::handle`'s own band
+/// checks), so only [`Self::emit`] (an extra `UiEvent::CellGrid` a
+/// commit's `cx.emit` call attaches alongside its own
+/// `CellEditCommitted`) carries anything real.
+struct GridHost {
+    units: Units,
+    emitted: Vec<UiEvent>,
+}
+
+impl GridHost {
+    fn new(units: Units) -> Self {
+        Self {
+            units,
+            emitted: Vec::new(),
+        }
+    }
+}
+
+impl EventHost for GridHost {
+    fn is_focused(&self, _id: &WidgetId, _sub: Option<SubTarget>) -> bool {
+        false
+    }
+
+    fn request_focus(&mut self, _id: &WidgetId, _sub: Option<SubTarget>) {}
+
+    fn capture_pointer(&mut self, _id: &WidgetId) {}
+
+    fn release_pointer(&mut self) {}
+
+    fn set_cursor(&mut self, _cursor: PointerShape) {}
+
+    fn request_redraw(&mut self) {}
+
+    fn emit(&mut self, event: UiEvent) {
+        self.emitted.push(event);
+    }
+
+    fn units(&self) -> Units {
+        self.units
+    }
+}
+
 impl View {
     /// The whole screen as `ScreenLayout` surfaces, back to front:
     /// formula bar, grid, chart panel, tab strip, status bar.
@@ -966,9 +1076,9 @@ impl View {
         let (grid_rect, tab_bar_rect) = CalcApp::carve_tab_strip(bands);
         let (cell_rect, chart_rect) = CalcApp::carve_chart_panel(grid_rect, self.charts.len());
         if let Some(grid) = &self.grid {
-            layout.push(Surface::CellGrid {
+            layout.push(Surface::Widget {
                 rect: cell_rect,
-                grid: grid.clone(),
+                widget: Box::new(grid.clone()),
             });
         }
         // Stacked evenly within the carved-off panel — see
@@ -1300,7 +1410,7 @@ impl AppLogic for CalcApp {
         // chrome clicks are below (the tab-strip click check has the
         // same guard) — clicking chrome while editing is a no-op here,
         // not a commit-then-proceed.
-        if !self.grid.is_editing() && !self.formula_focused {
+        if self.grid.editing.is_none() && !self.formula_focused {
             let menu_bar_rect = Self::menu_bar_rect(backend);
             match self.menu_system.handle(&event, backend, menu_bar_rect) {
                 MenuEvent::Activated(id) if id.as_str() == menu::QUIT => return Reaction::Exit,
@@ -1403,7 +1513,7 @@ impl AppLogic for CalcApp {
         // TUI-shaped backend, opens the palette — outside an active
         // edit, so neither shortcut fights with typing a literal `:`
         // or capital `P` into a cell.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && !self.formula_focused
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
         {
@@ -1436,7 +1546,7 @@ impl AppLogic for CalcApp {
         // own shortcut for `formulas.nameManager` rather than one this
         // app picked on its own. Same "outside an active edit" guard as
         // every shortcut above.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && (modifiers.ctrl || modifiers.cmd)
             && matches!(key, Key::Named(NamedKey::F(3)))
@@ -1457,10 +1567,10 @@ impl AppLogic for CalcApp {
         } = &event
             && Self::bands(backend).formula.contains(*position)
         {
-            if !self.grid.is_editing() {
+            if self.grid.editing.is_none() {
                 let a1 = self.cursor().a1();
                 let text = self.cell_input(&a1);
-                self.grid.start_editing(text);
+                self.start_editing(text);
             }
             self.formula_focused = true;
             self.refresh(backend);
@@ -1471,7 +1581,7 @@ impl AppLogic for CalcApp {
         // hit always matches what's on screen this frame. Guarded by
         // "outside an active edit" like every other shortcut below, so a
         // stray click there doesn't abandon an in-progress edit.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && let UiEvent::MouseDown {
                 button: MouseButton::Left,
                 position,
@@ -1504,7 +1614,7 @@ impl AppLogic for CalcApp {
         // click here would fall through to `self.grid.handle` and be
         // mis-resolved against a grid column that isn't actually under
         // the cursor once the sidebar has narrowed the grid's own rect.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && let UiEvent::MouseDown {
                 button: MouseButton::Left,
                 position,
@@ -1519,9 +1629,9 @@ impl AppLogic for CalcApp {
         }
         // `q`/Escape quit only outside an active edit — while editing, `q`
         // is a character to insert and Escape cancels the edit instead
-        // (`CellGridController::handle` routes both to the edit buffer
-        // when `is_editing`, same as quadraui's own `cell_grid_demo`).
-        if !self.grid.is_editing()
+        // (`CellGrid::handle` routes both to the edit buffer while
+        // `editing` is `Some`, same as quadraui's own `cell_grid_demo`).
+        if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, .. } = &event
             && matches!(key, Key::Char('q') | Key::Named(NamedKey::Escape))
         {
@@ -1530,7 +1640,7 @@ impl AppLogic for CalcApp {
         // Ctrl+S (Cmd+S on macOS) saves — also only outside an active
         // edit, so the shortcut never fights with typing a literal "s"
         // into a cell.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && (modifiers.ctrl || modifiers.cmd)
             && matches!(key, Key::Char('s') | Key::Char('S'))
@@ -1545,7 +1655,7 @@ impl AppLogic for CalcApp {
         // engine's own history — same "outside an active edit" guard as
         // Ctrl+S, so the shortcut never fights with typing a literal "z"
         // or "y" into a cell.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && (modifiers.ctrl || modifiers.cmd)
         {
@@ -1571,7 +1681,7 @@ impl AppLogic for CalcApp {
         // `PageUp`/`PageDown` arms page the grid regardless of
         // modifiers; same "outside an active edit" guard as every other
         // shortcut above.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && (modifiers.ctrl || modifiers.cmd)
         {
@@ -1598,11 +1708,9 @@ impl AppLogic for CalcApp {
         // edit" guard as every other shortcut above, so none of these
         // fight with typing a literal c/x/d/r into a cell. Ctrl+V has no
         // arm here: quadraui's runtime intercepts the native paste
-        // keypress before it ever reaches `handle` as a `KeyPressed` —
-        // it arrives below as `UiEvent::ClipboardPaste`, routed through
-        // the grid controller like any other event, and lands in
-        // `apply_controller_event`'s `PasteRequested` arm instead.
-        if !self.grid.is_editing()
+        // keypress before it ever reaches `handle` as a `KeyPressed` — it
+        // arrives below as its own `UiEvent::ClipboardPaste` arm instead.
+        if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && (modifiers.ctrl || modifiers.cmd)
         {
@@ -1626,45 +1734,52 @@ impl AppLogic for CalcApp {
                 return Reaction::Redraw;
             }
         }
-        // `CellGridController::handle` has no arm for `WindowResized` (it
-        // owns no viewport-size state of its own, only scroll/cursor), so
-        // it falls into `Ignored` and `refresh` below would never run.
-        // Without this, `render` keeps painting the cached `View::grid`,
-        // whose loaded window was sized for the old viewport — enlarging
-        // the terminal or window leaves the newly revealed rows/columns
-        // blank until the next cursor move. Refresh explicitly instead.
+        // `CellGrid::handle` has no notion of `WindowResized` (it owns no
+        // viewport-size state of its own, only scroll/cursor), and the
+        // conversion to `RoutedEvent` below has no arm for it either, so
+        // `refresh` below would never run. Without this, `render` keeps
+        // painting the cached `View::grid`, whose loaded window was sized
+        // for the old viewport — enlarging the terminal or window leaves
+        // the newly revealed rows/columns blank until the next cursor
+        // move. Refresh explicitly instead.
         if let UiEvent::WindowResized { .. } = &event {
             self.refresh(backend);
             return Reaction::Redraw;
         }
-        let rect = self.grid_rect(backend);
-        // While the formula bar owns the caret, keys go to it instead of
-        // the grid's own key dispatch — `handle_formula_bar_key` updates
-        // the exact same in-progress edit, so typing there commits the
-        // same way (Enter/Tab/arrows commit and move, Escape cancels).
-        // Anything that isn't a keypress (e.g. a click elsewhere) is left
-        // for a future frame rather than misrouted into the edit buffer.
-        if self.formula_focused {
-            return match &event {
-                UiEvent::KeyPressed { key, modifiers, .. } => {
-                    let event = self
-                        .grid
-                        .handle_formula_bar_key(key, modifiers, backend, rect);
-                    let reaction = self.apply_controller_event(event);
-                    if matches!(reaction, Reaction::Redraw) {
-                        self.refresh(backend);
-                    }
-                    reaction
+        // Ctrl+V (Cmd on macOS): quadraui's runtime intercepts the native
+        // paste keypress before it ever reaches `handle` as a `KeyPressed`
+        // — it arrives here as `UiEvent::ClipboardPaste` instead, with no
+        // `RoutedEvent` counterpart `CellGrid::handle` would recognize, so
+        // this app resolves it directly. While an edit is active the
+        // pasted text is inserted into its buffer, the same
+        // `TextField::apply_edit_op` bridge typing a character uses
+        // (`Self::apply_edit_op`); with no edit active it's handed to
+        // `edit.paste` at the selection's top-left corner, same anchor
+        // convention a menu/palette paste (`clipboard::paste_from_system`)
+        // resolves for an identical selection.
+        if let UiEvent::ClipboardPaste(text) = &event {
+            if self.grid.editing.is_some() {
+                self.apply_edit_op(EditOp::InsertText(text.clone()));
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+            if self.grid.row_count > 0 && self.grid.col_count > 0 {
+                let (top, left, ..) = self.grid.selection_bounds();
+                let anchor = Address::new(top as u32, left as u32).a1();
+                if let Err(e) = clipboard::paste(self, &anchor, text) {
+                    self.error = Some(e.to_string());
                 }
-                _ => Reaction::Continue,
-            };
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+            return Reaction::Continue;
         }
         // Alt+<letter> is reserved for a menu-bar mnemonic — none exist
-        // yet, but `CellGridController::handle` below has no notion of
-        // modifiers at all, so a plain `Key::Char` with `alt` set would
-        // otherwise start an edit and insert that bare letter into the
-        // active cell (e.g. Alt+A on an idle cell silently replacing its
-        // content with "a"). Every other shortcut guard above already
+        // yet, but the `RoutedEvent` conversion below has no notion of
+        // modifiers at all for a plain `Key::Char`, so one with `alt` set
+        // would otherwise start an edit and insert that bare letter into
+        // the active cell (e.g. Alt+A on an idle cell silently replacing
+        // its content with "a"). Every other shortcut guard above already
         // checks `modifiers.ctrl || modifiers.cmd` before letting a
         // keypress fall through to typing; this is the same guard for
         // `alt`, swallowing the keypress instead of mistyping it. Outside
@@ -1685,7 +1800,7 @@ impl AppLogic for CalcApp {
         //   characters (e.g. '@', '{', '€' on European layouts) still
         //   arrive as a normal `Key::Char`. Requiring `!modifiers.ctrl`
         //   lets those reach the grid instead of being swallowed.
-        if !self.grid.is_editing()
+        if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, modifiers, .. } = &event
             && modifiers.alt
             && !modifiers.ctrl
@@ -1693,12 +1808,70 @@ impl AppLogic for CalcApp {
         {
             return Reaction::Continue;
         }
-        let event = self.grid.handle(&event, backend, rect);
-        let reaction = self.apply_controller_event(event);
-        if matches!(reaction, Reaction::Redraw) {
-            self.refresh(backend);
+        // Every other event the grid might care about — a key (whether
+        // the formula bar or the grid itself visually owns the caret;
+        // `CellGrid::handle` branches on `CellGrid::editing` alone, so
+        // typing/committing/cancelling is identical either way, same as
+        // quadraui's own `examples/common/cell_grid_demo.rs`), a click or
+        // drag inside the grid body — converted to the `RoutedEvent`
+        // shape `Interactive::handle` expects and dispatched through
+        // `Self::dispatch_to_grid`. Anything else (a click elsewhere that
+        // no earlier check claimed) is left alone.
+        let rect = self.grid_rect(backend);
+        let layout = Self::grid_layout(&self.grid, backend, rect);
+        let units = Self::layout_ctx(backend).units();
+        let routed = match &event {
+            UiEvent::MouseDown {
+                button: MouseButton::Left,
+                position,
+                modifiers,
+                ..
+            } if rect.contains(*position) => Some(RoutedEvent::Pointer {
+                kind: PointerKind::Down(MouseButton::Left),
+                sub: None,
+                local: Point::new(position.x - rect.x, position.y - rect.y),
+                mods: *modifiers,
+            }),
+            UiEvent::MouseMoved {
+                position,
+                buttons: ButtonMask { left: true, .. },
+            } => Some(RoutedEvent::Pointer {
+                kind: PointerKind::Move,
+                sub: None,
+                local: Point::new(position.x - rect.x, position.y - rect.y),
+                mods: Modifiers::default(),
+            }),
+            UiEvent::MouseUp {
+                button: MouseButton::Left,
+                position,
+                ..
+            } => Some(RoutedEvent::Pointer {
+                kind: PointerKind::Up(MouseButton::Left),
+                sub: None,
+                local: Point::new(position.x - rect.x, position.y - rect.y),
+                mods: Modifiers::default(),
+            }),
+            UiEvent::KeyPressed {
+                key,
+                modifiers,
+                repeat,
+            } => Some(RoutedEvent::Key(KeyEvent {
+                key: key.clone(),
+                modifiers: *modifiers,
+                repeat: *repeat,
+            })),
+            _ => None,
+        };
+        match routed {
+            Some(routed) => {
+                let reaction = self.dispatch_to_grid(routed, &layout, units);
+                if matches!(reaction, Reaction::Redraw) {
+                    self.refresh(backend);
+                }
+                reaction
+            }
+            None => Reaction::Continue,
         }
-        reaction
     }
 
     /// Picks up the refresh `run_command` couldn't do itself (see
@@ -1736,58 +1909,162 @@ impl AppLogic for CalcApp {
 }
 
 impl CalcApp {
-    /// Apply one [`CellGridControllerEvent`] from `handle`'s own
-    /// `CellGridController::handle` call. The controller owns no cell
-    /// content (see its module doc), so a request to edit or commit a
-    /// cell is this app's cue to read/write that cell through the engine.
-    fn apply_controller_event(&mut self, event: CellGridControllerEvent) -> Reaction {
+    /// [`LayoutCtx`] resolved from `backend` — the same chrome-metric
+    /// resolution `Backend::draw_primitive` applies before calling
+    /// [`Primitive::layout`], built by hand here since this app resolves
+    /// `CellGrid`'s layout once per frame/event to window its cells or
+    /// hit-test a click rather than through a `draw_primitive` call
+    /// (which would also paint). Mirrors quadraui's own
+    /// `examples/common/cell_grid_demo.rs::layout_ctx`.
+    fn layout_ctx(backend: &dyn Backend) -> LayoutCtx {
+        LayoutCtx {
+            line_height: LayoutCtx::resolve_row_height(
+                backend.chrome_line_height(),
+                &backend.style(),
+            ),
+            char_width: backend.char_width(),
+            nerd_fonts_enabled: backend.nerd_fonts_enabled(),
+        }
+    }
+
+    /// `Primitive::layout` resolved for `grid` at `rect` — called
+    /// through the trait explicitly (not `grid.layout(...)`) since
+    /// `CellGrid` also has its own unrelated six-argument inherent
+    /// `layout` method (see that method's own doc) that dot-call syntax
+    /// would otherwise prefer. Mirrors quadraui's own
+    /// `examples/common/cell_grid_demo.rs::grid_layout`.
+    fn grid_layout(grid: &CellGrid, backend: &dyn Backend, rect: Rect) -> CellGridPrimitiveLayout {
+        Primitive::layout(grid, &Self::layout_ctx(backend), rect)
+    }
+
+    /// Route one already-converted [`RoutedEvent`] into `self.grid`'s own
+    /// [`CellGrid::handle`] and apply whatever [`CellGridEvent`] it
+    /// reports (plus every extra event [`GridHost::emit`] collected — see
+    /// that type's own doc for why nothing else it carries matters here).
+    /// Mirrors quadraui's own
+    /// `examples/common/cell_grid_demo.rs::CellGridDemo::dispatch_to_grid`.
+    fn dispatch_to_grid(
+        &mut self,
+        routed: RoutedEvent,
+        layout: &CellGridPrimitiveLayout,
+        units: Units,
+    ) -> Reaction {
+        let mut host = GridHost::new(units);
+        let handled = {
+            let mut cx = EventCx::new(self.grid.id, &mut host);
+            self.grid
+                .handle(&mut self.grid_state, &routed, layout, &mut cx)
+        };
+        let mut reaction = match handled {
+            Handled::Event(event) => self.apply_grid_event(event),
+            Handled::Consumed => Reaction::Redraw,
+            Handled::Ignored => Reaction::Continue,
+        };
+        let grid_id = self.grid.id;
+        for extra in host.emitted {
+            if let UiEvent::CellGrid(id, event) = extra
+                && id == grid_id
+            {
+                reaction = reaction.merge(self.apply_grid_event(event));
+            }
+        }
+        reaction
+    }
+
+    /// Apply one [`CellGridEvent`] from [`Self::dispatch_to_grid`]'s own
+    /// `CellGrid::handle` call. `Interactive::handle` only ever has
+    /// `&self` (that trait's own doc), so every navigation/edit outcome
+    /// — a plain arrow, a click, a drag, F2, a commit, a cancel — comes
+    /// back as an event instead of being applied in place; this writes
+    /// it onto `self.grid`'s own fields, and a commit is also this app's
+    /// cue to write the cell through the engine, the one way the UI ever
+    /// changes a workbook.
+    fn apply_grid_event(&mut self, event: CellGridEvent) -> Reaction {
         match event {
-            CellGridControllerEvent::Ignored => Reaction::Continue,
+            CellGridEvent::Navigated {
+                cursor,
+                selection_anchor,
+                row_scroll,
+                col_scroll,
+            } => {
+                self.grid.cursor = cursor;
+                self.grid.selection_anchor = selection_anchor;
+                self.grid.row_scroll = row_scroll;
+                self.grid.col_scroll = col_scroll;
+                Reaction::Redraw
+            }
             // F2: seed the inline editor with this cell's current raw
-            // input — the controller has no cell content to seed it with
-            // itself.
-            CellGridControllerEvent::CellEditRequested { row, col } => {
+            // input — `CellGrid` has no cell content to seed it with
+            // itself (see its module doc).
+            CellGridEvent::CellEditRequested { row, col } => {
                 let a1 = Address::new(row as u32, col as u32).a1();
                 let text = self.cell_input(&a1);
-                self.grid.start_editing(text);
+                self.start_editing(text);
+                Reaction::Redraw
+            }
+            // A fresh edit started (a plain keypress with none active
+            // yet), or the in-progress one's text buffer changed
+            // (insert/delete/select) — either way `edit` is what
+            // `CellGrid::editing` becomes next frame.
+            CellGridEvent::CellEditStarted { edit, .. }
+            | CellGridEvent::CellEditChanged { edit, .. } => {
+                self.grid.editing = Some(edit);
                 Reaction::Redraw
             }
             // Enter/Tab/an arrow key committed the in-progress edit — hand
-            // the raw text to the engine's own `cell.set`, the one way the
-            // UI ever changes a workbook.
-            CellGridControllerEvent::CellEditCommitted { row, col, text } => {
+            // the raw text to the engine's own `cell.set`.
+            CellGridEvent::CellEditCommitted { row, col, text } => {
                 let a1 = Address::new(row as u32, col as u32).a1();
                 if let Err(e) = self.set_cell(&a1, &text) {
                     self.error = Some(e.to_string());
                 }
+                self.grid.editing = None;
                 self.formula_focused = false;
                 Reaction::Redraw
             }
             // Escape cancelled the edit — whether it was typed through
             // the grid or the formula bar, neither owns the (now gone)
             // caret any more.
-            CellGridControllerEvent::CellEditCancelled { .. } => {
+            CellGridEvent::CellEditCancelled { .. } => {
+                self.grid.editing = None;
                 self.formula_focused = false;
                 Reaction::Redraw
             }
-            // Ctrl/Cmd+V with no edit in progress — quadraui's runtime
-            // already resolved the system clipboard's text before this
-            // ever ran (see `crate::clipboard::paste`'s own doc) and the
-            // controller anchored it at the selection's top-left corner,
-            // so this just hands both straight to `edit.paste`.
-            CellGridControllerEvent::PasteRequested {
-                anchor_row,
-                anchor_col,
-                text,
-            } => {
-                let anchor = Address::new(anchor_row as u32, anchor_col as u32).a1();
-                if let Err(e) = clipboard::paste(self, &anchor, &text) {
-                    self.error = Some(e.to_string());
-                }
-                Reaction::Redraw
-            }
+            // `CellsRequested` needs no action of its own: `Self::refresh`
+            // always rebuilds `self.grid.cells` fresh for the current
+            // `row_scroll`/`col_scroll` on the very next frame, never
+            // trying to avoid that recompute the way a host windowing a
+            // genuinely expensive data source might.
             _ => Reaction::Redraw,
         }
+    }
+
+    /// Apply `op` to the in-progress cell edit's text buffer — used for
+    /// `UiEvent::ClipboardPaste` while editing, the one text-buffer
+    /// mutation that reaches this app directly rather than through
+    /// `CellGrid::handle`/`Self::dispatch_to_grid` (quadraui's runtime
+    /// resolves a native paste keypress to `UiEvent::ClipboardPaste`
+    /// before `handle` ever sees it as a `KeyPressed`, and `RoutedEvent`
+    /// has no counterpart for it — see `handle`'s own `ClipboardPaste`
+    /// arm). Bridges through a scratch [`TextField`] and its own
+    /// `apply_edit_op`, the same flat byte-offset editor `CellGrid`'s
+    /// internal `apply_edit` uses, since `CellGrid` exposes no public
+    /// edit-buffer-mutation entry point of its own.
+    fn apply_edit_op(&mut self, op: EditOp) {
+        let Some(edit) = self.grid.editing.take() else {
+            return;
+        };
+        let mut field = TextField::new(WidgetId::new("quadracalc-grid:editor"))
+            .with_value(edit.text)
+            .with_cursor(Some(edit.cursor))
+            .with_selection_anchor(edit.selection_anchor);
+        field.apply_edit_op(op);
+        self.grid.editing = Some(CellEditState {
+            text: field.value,
+            cursor: field.cursor.unwrap_or(0),
+            selection_anchor: field.selection_anchor,
+            placeholder: edit.placeholder,
+        });
     }
 
     /// Resolves a click already known to land inside `rect` (`handle`'s
@@ -1946,7 +2223,7 @@ mod tests {
 
         // A plain arrow afterwards collapses the selection back to one cell.
         app.handle(key(NamedKey::Down, Modifiers::default()), &mut b);
-        assert_eq!(app.grid.selection_anchor(), None);
+        assert_eq!(app.grid.selection_anchor, None);
     }
 
     #[test]
@@ -2022,10 +2299,11 @@ mod tests {
         let rows_before = app.view().grid.as_ref().unwrap().cells.len();
 
         // Grow the viewport well past the original 20 rows and re-dispatch
-        // through `handle`, the way a real resize reaches the app — without
-        // an explicit `WindowResized` arm, `CellGridController::handle`
-        // ignores the event and `refresh` never runs, so the cached `View`
-        // stays sized for the old, smaller viewport.
+        // through `handle`, the way a real resize reaches the app —
+        // without an explicit `WindowResized` arm, the `RoutedEvent`
+        // conversion ahead of `CellGrid::handle` has no arm for it either
+        // and `refresh` never runs, so the cached `View` stays sized for
+        // the old, smaller viewport.
         let grown = Viewport::new(40.0, 200.0, 1.0);
         b.begin_frame(grown);
         let reaction = app.handle(UiEvent::WindowResized { viewport: grown }, &mut b);
@@ -2194,7 +2472,7 @@ mod tests {
             "Alt+letter should be swallowed, not start an edit"
         );
         assert!(
-            !app.grid.is_editing(),
+            app.grid.editing.is_none(),
             "Alt+letter must not start an in-cell edit"
         );
         assert_eq!(
@@ -2230,21 +2508,20 @@ mod tests {
             "an Option-composed character must start an edit, not be swallowed"
         );
         assert!(
-            app.grid.is_editing(),
+            app.grid.editing.is_some(),
             "Option+A must start editing the active cell on macOS"
         );
     }
 
     // No end-to-end test for the AltGr (Ctrl+Alt) carve-out: `Key::Char`
-    // with `ctrl: true` already falls to
-    // `CellGridController::handle_key`'s own `jump = modifiers.ctrl ||
-    // modifiers.cmd` guard, which treats *any* `ctrl` as a navigation
-    // modifier and skips `begin_typing` regardless of this app's own
-    // mnemonic guard — so an end-to-end `app.handle` test can't yet
-    // observe the `!modifiers.ctrl` condition doing anything, and would
-    // pass or fail for a reason unrelated to this file. That conflation
-    // lives in quadraui's `cell_grid_controller.rs`, out of scope here.
-    // `!modifiers.ctrl` is kept anyway, both because it's the narrow,
-    // correct condition and so a future quadraui fix doesn't silently
-    // regress through this guard.
+    // with `ctrl: true` already falls to `CellGrid::handle_key_idle`'s own
+    // `jump = modifiers.ctrl || modifiers.cmd` guard, which treats *any*
+    // `ctrl` as a navigation modifier and skips `begin_typing` regardless
+    // of this app's own mnemonic guard — so an end-to-end `app.handle`
+    // test can't yet observe the `!modifiers.ctrl` condition doing
+    // anything, and would pass or fail for a reason unrelated to this
+    // file. That conflation lives in quadraui's `primitives/cell_grid.rs`,
+    // out of scope here. `!modifiers.ctrl` is kept anyway, both because
+    // it's the narrow, correct condition and so a future quadraui fix
+    // doesn't silently regress through this guard.
 }

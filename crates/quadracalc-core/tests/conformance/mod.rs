@@ -86,9 +86,10 @@ pub fn undo_redo<D: ConformanceDriver>(d: &mut D) {
 /// lifted to run against any backend. Needs a blank `CalcApp::new()` as
 /// its fixture.
 ///
-/// `Ctrl+C` exercises the real copy path (`CellGridController` arms the
-/// engine's own clipboard and writes the OS clipboard, discarded here —
-/// a headless test backend has no display to round-trip through). The
+/// `Ctrl+C` exercises the real copy path (`CalcApp::handle`'s own
+/// shortcut dispatch arms the engine's own clipboard and writes the OS
+/// clipboard, discarded here — a headless test backend has no display
+/// to round-trip through). The
 /// synthetic `ClipboardPaste` dispatch stands in for "the OS clipboard
 /// round-tripped it", the same stand-in `tests/clipboard.rs`'s own
 /// black-box test uses; its payload only matters when nothing was
