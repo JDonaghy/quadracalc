@@ -54,14 +54,29 @@ fn mcp_client_builds_a_summary_through_set_cell_run_command_and_get_range() {
     let waker = driver.backend().waker();
     let (handle, port) = channel(waker);
 
-    let socket_path = std::env::temp_dir().join(format!(
-        "quadracalc-mcp-roundtrip-{}-{}.sock",
+    // `sockaddr_un::sun_path` is capped at 104 bytes on macOS (`SUN_LEN`,
+    // smaller still on some other unixes), and `std::env::temp_dir()` is
+    // `$TMPDIR` on macOS, e.g. `/var/folders/sr/<hash>/T/`, which alone can
+    // run ~50 bytes — long enough that this test's own file name pushes it
+    // over the limit. Prefer the short, fixed `/tmp` whenever the file name
+    // would still fit under it; only fall back to `temp_dir()` (and let the
+    // connect loop below report the `SUN_LEN` error) if `/tmp` itself isn't
+    // short enough, which isn't expected on any unix this test runs on.
+    let file_name = format!(
+        "qc-mcp-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
-    ));
+    );
+    const SUN_LEN_BUDGET: usize = 100;
+    let short_dir = std::path::Path::new("/tmp");
+    let socket_path = if short_dir.join(&file_name).as_os_str().len() <= SUN_LEN_BUDGET {
+        short_dir.join(&file_name)
+    } else {
+        std::env::temp_dir().join(&file_name)
+    };
     let _ = std::fs::remove_file(&socket_path);
 
     let server_socket_path = socket_path.clone();
