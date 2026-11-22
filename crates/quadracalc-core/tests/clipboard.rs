@@ -306,3 +306,54 @@ fn ctrl_v_through_dispatch_pastes_a_copied_formula_with_adjusted_references() {
     // The source is untouched by a copy, same as the core-level test.
     assert_eq!(driver.app_mut().cell_input("B1"), "=A1*2");
 }
+
+/// Menu/palette Paste (`clipboard::paste_from_system`, issue #38) over a
+/// system clipboard that can't be read at all — the SSH/headless case
+/// `TuiClipboard::read_text` hits unconditionally in this test process
+/// (no `DISPLAY`/`WAYLAND_DISPLAY`, same as `ctrl_v_through_dispatch_…`'s
+/// own comment above). Driven through the command palette rather than a
+/// direct `clipboard::paste_from_system` call, since that function is
+/// `pub(crate)` and the palette is its production caller.
+///
+/// Regression for `paste_from_system` bailing with "system clipboard is
+/// empty" on a `None` read instead of falling back to the engine's own
+/// internal clipboard a prior in-app `edit.copy` armed — exactly the
+/// path that worked before `paste_from_system` existed.
+#[test]
+fn palette_paste_falls_back_to_the_engines_internal_clipboard_when_the_system_clipboard_is_unreadable()
+ {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
+    driver.app_mut().set_cell("A1", "10").unwrap();
+    driver.app_mut().set_cell("B1", "=A1*2").unwrap();
+    driver.press_named(NamedKey::Right);
+    assert_eq!(driver.app().view().selection_label, "B1");
+
+    driver.ctrl_char('c');
+    assert_eq!(driver.app_mut().cell_text("B1"), "20");
+
+    for _ in 0..4 {
+        driver.press_named(NamedKey::Down);
+    }
+    assert_eq!(driver.app().view().selection_label, "B5");
+
+    driver.type_char(':');
+    for c in "paste".chars() {
+        driver.type_char(c);
+    }
+    assert!(driver.screen_contains("Paste"), "{}", driver.screen());
+    driver.press_named(NamedKey::Enter);
+
+    assert!(
+        driver.app().view().error.is_none(),
+        "menu/palette Paste should fall back to the internal clipboard \
+         instead of erroring when the system clipboard can't be read: {:?}",
+        driver.app().view().error
+    );
+    assert_eq!(
+        driver.app_mut().cell_input("B5"),
+        "=A5*2",
+        "pasting four rows down should shift the relative reference by four rows"
+    );
+    assert_eq!(driver.app_mut().cell_text("B5"), "0");
+    assert_eq!(driver.app_mut().cell_input("B1"), "=A1*2");
+}

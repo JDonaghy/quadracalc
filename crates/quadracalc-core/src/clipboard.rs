@@ -35,6 +35,10 @@
 //!   `edit.paste`'s own doc.
 //! - `fill_down`/`fill_right` touch no clipboard at all, just the
 //!   selection.
+//! - `paste_from_system` (menu/palette Paste, which has no already-
+//!   resolved `UiEvent::ClipboardPaste`) reads the system clipboard
+//!   itself and falls back to a bare `edit.paste` — the engine's own
+//!   internal clipboard — when that read fails, see its own doc.
 
 use quadraui::Backend;
 use serde_json::{Value, json};
@@ -82,15 +86,33 @@ pub(crate) fn paste(app: &mut CalcApp, anchor: &str, text: &str) -> anyhow::Resu
 /// raw cursor (see [`CalcApp::selection_anchor`]'s own doc for why those
 /// two can differ). `palette::classify` marks `edit.paste` enabled
 /// unconditionally for exactly this reason — see that module's own doc.
+///
+/// `backend.services().clipboard().read_text()` fails whenever there's no
+/// real OS clipboard to read from — most notably a TUI over SSH with no
+/// local desktop session, where quadraui's `arboard`-only read has no
+/// OSC-52/native-tool fallback. When that happens this falls back to a
+/// bare `edit.paste` with no `text` param at all (never an empty-string
+/// `text`, which the engine would treat as literal external TSV and
+/// overwrite the selection with blank cells), landing on the engine's
+/// own internal `Session.clipboard` armed by a prior in-app
+/// `edit.copy`/`edit.cut` — restoring the exact copy-then-paste round
+/// trip that worked before this function read the system clipboard at
+/// all. A blank-selection `copy` (see `run_and_mirror`) never touches the
+/// OS clipboard but still arms that internal clipboard, so this fallback
+/// is checked only when the system clipboard has nothing, never instead
+/// of it.
 pub(crate) fn paste_from_system(
     app: &mut CalcApp,
     backend: &mut dyn Backend,
 ) -> anyhow::Result<()> {
-    let Some(text) = backend.services().clipboard().read_text() else {
-        anyhow::bail!("system clipboard is empty");
-    };
     let anchor = app.selection_anchor().a1();
-    paste(app, &anchor, &text)
+    match backend.services().clipboard().read_text() {
+        Some(text) => paste(app, &anchor, &text),
+        None => {
+            app.execute("edit.paste", json!({ "at": anchor }))?;
+            Ok(())
+        }
+    }
 }
 
 /// Ctrl+D: `edit.fillDown` — fills the selection from its top row (or,
