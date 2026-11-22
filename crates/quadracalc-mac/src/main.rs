@@ -6,6 +6,20 @@
 //! alongside the window — see `quadracalc_core::agent`'s module doc for
 //! the three app commands it registers and the transport it binds.
 
+/// Dock/app-switcher icon, applied via `RunConfig::with_app_icon` —
+/// `assets/app-icon/quadracalc-macos-512.png`, already laid out on Apple's
+/// safe-area grid (see that directory's README). Embedded so the binary
+/// doesn't need to locate the asset at runtime.
+#[cfg(target_os = "macos")]
+static APP_ICON_PNG: &[u8] =
+    include_bytes!("../../../assets/app-icon/quadracalc-macos-512.png");
+
+#[cfg(target_os = "macos")]
+fn run_config() -> quadraui::macos::RunConfig {
+    quadraui::macos::RunConfig::default()
+        .with_app_icon(quadraui::ImageSource::Bytes(APP_ICON_PNG.to_vec()))
+}
+
 #[cfg(target_os = "macos")]
 fn main() -> std::process::ExitCode {
     let args = match quadracalc_core::agent::parse_args(std::env::args().skip(1)) {
@@ -25,7 +39,7 @@ fn main() -> std::process::ExitCode {
     };
 
     if !args.mcp {
-        return match quadraui::macos::run(app) {
+        return match quadraui::macos::run_with(app, run_config()) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("quadracalc: {e}");
@@ -41,7 +55,7 @@ fn main() -> std::process::ExitCode {
     // example.
     let transport = quadracalc_core::agent::mcp_transport();
     eprintln!("quadraui-mcp listening on {transport:?}");
-    let mut runner = quadraui::macos::MacRunner::new(app);
+    let mut runner = quadraui::macos::MacRunner::new_with(app, run_config());
     let handle = runner.attach_control();
     quadracalc_core::agent::spawn_mcp_server(handle, transport);
 

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- quadracalc app icon: a 2x2 grid ("quadra") with one selected cell and
+       its fill handle, on a full-bleed app-colour tile. Original geometry
+       written by hand for this repository; not modelled on any vendor's
+       spreadsheet logo (no letters, no "X", no overlapping panels).
+       Palette: ink #101114, paper #f4f1e8, app colour #2f5fa6. -->
+  <defs>
+    <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="512" height="512" fill="#2f5fa6"/>
+  </g>
+  <!-- card -->
+  <rect x="88" y="88" width="336" height="336" rx="32" fill="#f4f1e8" stroke="#101114" stroke-width="16"/>
+  <!-- grid lines, round-capped -->
+  <g stroke="#101114" stroke-width="16" stroke-linecap="round">
+    <line x1="256" y1="104" x2="256" y2="408"/>
+    <line x1="104" y1="256" x2="408" y2="256"/>
+  </g>
+  <!-- selected cell (bottom-right quadrant) -->
+  <rect x="272" y="272" width="136" height="136" fill="#2f5fa6" stroke="#101114" stroke-width="10"/>
+  <!-- fill handle -->
+  <rect x="394" y="394" width="28" height="28" fill="#101114" stroke="#f4f1e8" stroke-width="4"/>
+</svg>
