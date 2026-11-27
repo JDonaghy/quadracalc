@@ -1,0 +1,30 @@
+ File  Home  Insert  Formulas  Data  View                                                           
+ D15       fx [=B15*C15                                                                            ]
+          A    │    B     │   C   │     D     │    E    │       F        │G │     H      │    I    │
+    1 Item     │Cost      │       │Tier       │Discount │Discounted Total│  │            │         │
+    2 Hosting  │ $1,200.50│       │Premium    │   15.00%│       $1,028.08│  │            │         │
+    3 Domains  │     $9.00│       │           │         │                │  │            │         │
+    4 Total    │ $1,209.50│       │           │         │                │  │            │         │
+    5          │          │       │           │         │                │  │            │         │
+    6 Tier     │Discount  │       │           │         │                │  │            │         │
+    7 Standard │      0.05│       │           │         │                │  │            │         │
+    8 Premium  │      0.15│       │           │         │                │  │            │         │
+    9          │          │       │           │         │                │  │            │         │
+   10 Month    │  Units   │ Price │  Revenue  │ Growth  │  Over target?  │  │At a glance │         │
+   11 Jan      │       120│ $24.00│  $2,880.00│         │no              │  │Best month  │Dec      │
+   12 Feb      │       135│ $24.00│  ┌─────────────────────┐             │  │Peak revenue│$8,424.00│
+   13 Mar      │       160│ $24.50│  │ Cut          Ctrl+X │             │  │Avg units   │    202.4│
+   14 Apr      │       152│ $24.50│  │ Copy         Ctrl+C │             │  │Target      │$5,000.00│
+   15 May      │       181│ $25.00│  │ Paste        Ctrl+V │             │  │            │         │
+   16 Jun      │       204│ $25.00│  │─────────────────────│             │  │            │         │
+   17 Jul      │       197│ $25.50│  │ Insert Row          │             │  │            │         │
+   18 Aug      │       223│ $25.50│  │ Delete Row          │             │  │            │         │
+   19 Sep      │       241│ $26.00│  │ Insert Column       │             │  │            │         │
+   20 Oct      │       236│ $26.00│  │ Delete Column       │             │  │            │         │
+   21 Nov      │       268│ $26.50│  │─────────────────────│             │  │            │         │
+   22 Dec      │       312│ $27.00│  │ Clear Contents  Del │             │  │            │         │
+   23 Total    │      2429│ $25.54│ $│ Bold                │f 12         │  │            │         │
+   24          │          │       │  │ Number Format…      │             │  │            │         │
+   25          │          │       │  │─────────────────────│             │  │            │         │
+ Sheet1 │                            │ Find…        Ctrl+F │                                        
+ READY  D15  =B15*C15  →  $4,525.00  └─────────────────────┘   Average: 4525   Count: 1   Sum: 4525 

@@ -1,0 +1,425 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="540" viewBox="0 0 900 540" font-family="'SF Mono','DejaVu Sans Mono',monospace" font-size="14" xml:space="preserve">
+<rect width="100%" height="100%" fill="#101010"/>
+<rect x="0" y="0" width="900" height="18" fill="#14161e"/>
+<text x="9" y="14" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">F</text>
+<text x="18" y="14" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">ile</text>
+<text x="63" y="14" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">H</text>
+<text x="72" y="14" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">ome</text>
+<text x="117" y="14" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">I</text>
+<text x="126" y="14" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">nsert</text>
+<text x="189" y="14" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">For</text>
+<text x="216" y="14" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">m</text>
+<text x="225" y="14" textLength="36" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">ulas</text>
+<text x="279" y="14" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">D</text>
+<text x="288" y="14" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">ata</text>
+<text x="333" y="14" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">V</text>
+<text x="342" y="14" textLength="27" lengthAdjust="spacingAndGlyphs" fill="#8c8c96">iew</text>
+<rect x="0" y="18" width="90" height="18" fill="#1f4e79"/>
+<rect x="90" y="18" width="36" height="18" fill="#18283c"/>
+<rect x="126" y="18" width="774" height="18" fill="#303440"/>
+<text x="0" y="32" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold"> A1       </text>
+<text x="90" y="32" textLength="36" lengthAdjust="spacingAndGlyphs" fill="#a0bedc"> fx </text>
+<text x="126" y="32" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#787a87">[</text>
+<text x="135" y="32" textLength="756" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">Item                                                                                </text>
+<text x="891" y="32" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#787a87">]</text>
+<rect x="0" y="36" width="900" height="18" fill="#14161e"/>
+<text x="90" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">A</text>
+<text x="135" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="189" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">D</text>
+<text x="243" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="288" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">E</text>
+<text x="333" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="405" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">F</text>
+<text x="486" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="495" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">G</text>
+<text x="513" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="567" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">H</text>
+<text x="630" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="675" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">I</text>
+<text x="729" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="765" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">J</text>
+<text x="801" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="837" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">K</text>
+<text x="873" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="882" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">L</text>
+<text x="891" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="54" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="54" width="90" height="18" fill="#3c5078"/>
+<rect x="144" y="54" width="351" height="18" fill="#1f4e79"/>
+<rect x="495" y="54" width="405" height="18" fill="#14161e"/>
+<text x="0" y="68" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">    1 </text>
+<text x="54" y="68" textLength="36" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Item</text>
+<text x="135" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="68" textLength="36" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Tier</text>
+<text x="243" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="68" textLength="72" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Discount</text>
+<text x="333" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="68" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Discounted Total</text>
+<text x="486" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="72" width="900" height="18" fill="#14161e"/>
+<text x="0" y="86" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   11 Jan      </text>
+<text x="135" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="86" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $2,880.00</text>
+<text x="243" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="86" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">no              </text>
+<text x="486" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="522" y="86" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">Best month</text>
+<text x="630" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="639" y="86" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">Dec       </text>
+<text x="729" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="86" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="90" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="90" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="104" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   12 Feb      </text>
+<text x="135" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="104" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $3,240.00</text>
+<text x="243" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="104" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   12.50%</text>
+<text x="333" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="104" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">no              </text>
+<text x="486" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="522" y="104" textLength="108" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">Peak revenue</text>
+<text x="630" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="639" y="104" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc"> $8,424.00</text>
+<text x="729" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="104" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="108" width="900" height="18" fill="#14161e"/>
+<text x="0" y="122" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   13 Mar      </text>
+<text x="135" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="122" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $3,920.00</text>
+<text x="243" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="122" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   20.99%</text>
+<text x="333" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="122" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">no              </text>
+<text x="486" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="522" y="122" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">Avg units</text>
+<text x="630" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="639" y="122" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">     202.4</text>
+<text x="729" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="122" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="126" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="126" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="140" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   14 Apr      </text>
+<text x="135" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="140" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $3,724.00</text>
+<text x="243" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="140" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   -5.00%</text>
+<text x="333" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="140" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">no              </text>
+<text x="486" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="522" y="140" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">Target</text>
+<text x="630" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="639" y="140" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc"> $5,000.00</text>
+<text x="729" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="140" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="144" width="900" height="18" fill="#14161e"/>
+<text x="0" y="158" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   15 May      </text>
+<text x="135" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="158" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $4,525.00</text>
+<text x="243" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="158" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   21.51%</text>
+<text x="333" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="158" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">no              </text>
+<text x="486" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="162" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="162" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="176" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   16 Jun      </text>
+<text x="135" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="176" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $5,100.00</text>
+<text x="243" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="176" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   12.71%</text>
+<text x="333" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="176" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">yes             </text>
+<text x="486" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="176" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="180" width="900" height="18" fill="#14161e"/>
+<text x="0" y="194" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   17 Jul      </text>
+<text x="135" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="194" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $5,023.50</text>
+<text x="243" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="194" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   -1.50%</text>
+<text x="333" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="194" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">yes             </text>
+<text x="486" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="194" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="198" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="198" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="212" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   18 Aug      </text>
+<text x="135" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="212" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $5,686.50</text>
+<text x="243" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="212" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   13.20%</text>
+<text x="333" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="212" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">yes             </text>
+<text x="486" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="212" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="216" width="900" height="18" fill="#14161e"/>
+<text x="0" y="230" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   19 Sep      </text>
+<text x="135" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="230" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $6,266.00</text>
+<text x="243" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="230" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   10.19%</text>
+<text x="333" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="230" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">yes             </text>
+<text x="486" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="230" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="234" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="234" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="248" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   20 Oct      </text>
+<text x="135" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="248" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $6,136.00</text>
+<text x="243" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="248" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   -2.07%</text>
+<text x="333" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="248" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">yes             </text>
+<text x="486" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="248" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="252" width="900" height="18" fill="#14161e"/>
+<text x="0" y="266" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   21 Nov      </text>
+<text x="135" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="266" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $7,102.00</text>
+<text x="243" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="266" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   15.74%</text>
+<text x="333" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="266" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">yes             </text>
+<text x="486" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="266" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="270" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="270" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="284" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   22 Dec      </text>
+<text x="135" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="144" y="284" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">  $8,424.00</text>
+<text x="243" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="252" y="284" textLength="81" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   18.61%</text>
+<text x="333" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="284" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">yes             </text>
+<text x="486" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="284" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="288" width="900" height="18" fill="#14161e"/>
+<text x="0" y="302" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   23 </text>
+<text x="54" y="302" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">Total</text>
+<text x="135" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="153" y="302" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">$62,027.00</text>
+<text x="243" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="270" y="302" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">192.50%</text>
+<text x="333" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="342" y="302" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">7 of 12</text>
+<text x="486" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="306" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="306" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="320" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   24          </text>
+<text x="135" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="320" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="324" width="900" height="18" fill="#14161e"/>
+<text x="0" y="338" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   25          </text>
+<text x="135" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="338" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="342" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="342" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="356" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   26          </text>
+<text x="135" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="356" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="360" width="900" height="18" fill="#14161e"/>
+<text x="0" y="374" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   27          </text>
+<text x="135" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="374" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="378" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="378" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="392" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   28          </text>
+<text x="135" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="392" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="396" width="900" height="18" fill="#14161e"/>
+<text x="0" y="410" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   29          </text>
+<text x="135" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="410" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="414" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="414" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="428" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   30          </text>
+<text x="135" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="428" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="432" width="900" height="18" fill="#14161e"/>
+<text x="0" y="446" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   31          </text>
+<text x="135" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="446" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="450" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="450" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="464" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   32          </text>
+<text x="135" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="464" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="468" width="900" height="18" fill="#14161e"/>
+<text x="0" y="482" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   33          </text>
+<text x="135" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="482" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="486" width="54" height="18" fill="#14161e"/>
+<rect x="54" y="486" width="846" height="18" fill="#1c1e26"/>
+<text x="0" y="500" textLength="135" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   34          </text>
+<text x="135" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="243" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="333" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="486" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="513" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="630" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="729" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="801" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="873" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="891" y="500" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="504" width="72" height="18" fill="#282c38"/>
+<rect x="72" y="504" width="828" height="18" fill="#14161e"/>
+<text x="0" y="518" textLength="72" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc"> Sheet1 </text>
+<text x="72" y="518" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<rect x="0" y="522" width="99" height="18" fill="#142d50"/>
+<rect x="99" y="522" width="54" height="18" fill="#21426e"/>
+<rect x="153" y="522" width="135" height="18" fill="#142d50"/>
+<rect x="288" y="522" width="522" height="18" fill="#21426e"/>
+<rect x="810" y="522" width="90" height="18" fill="#142d50"/>
+<text x="0" y="536" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold"> READY  A1 </text>
+<text x="99" y="536" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#e6e6e6"> Item </text>
+<text x="288" y="536" textLength="522" lengthAdjust="spacingAndGlyphs" fill="#c8d2e1"> F2 edit · Ctrl+F find · : commands · Alt+H menu · q quit </text>
+<text x="810" y="536" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#ffffff"> Count: 1 </text>
+</svg>

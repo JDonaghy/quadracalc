@@ -1,0 +1,30 @@
+ File  Home  Insert  Formulas  Data  View                                                           
+ A1   ┌───────────────────────┐                                                                    ]
+      │ Undo           Ctrl+Z │   │     D     │    E    │       F        │G │     H      │    I    │
+    1 │ Redo  nothing to redo │   │Tier       │Discount │Discounted Total│  │            │         │
+    2 │───────────────────────│   │Premium    │   15.00%│       $1,028.08│  │            │         │
+    3 │ Clipboard            ▶│   │           │         │                │  │            │         │
+    4 │ Font                 ▶│   │           │         │                │  │            │         │
+    5 │ Alignment            ▶│┌───────────────────────────┐             │  │            │         │
+    6 │ Number               ▶││ Number Format             │             │  │            │         │
+    7 │ Styles               ▶││ Accounting Number Format  │             │  │            │         │
+    8 │ Cells                ▶││ Percent Style             │             │  │            │         │
+    9 │ Editing              ▶││ Comma Style               │             │  │            │         │
+   10 │ Add-ins              ▶││ Increase Decimal          │ver target?  │  │At a glance │         │
+   11 └───────────────────────┘│ Decrease Decimal          │             │  │Best month  │Dec      │
+   12 Feb      │       135│ $24└───────────────────────────┘             │  │Peak revenue│$8,424.00│
+   13 Mar      │       160│ $24.50│  $3,920.00│   20.99%│no              │  │Avg units   │    202.4│
+   14 Apr      │       152│ $24.50│  $3,724.00│   -5.00%│no              │  │Target      │$5,000.00│
+   15 May      │       181│ $25.00│  $4,525.00│   21.51%│no              │  │            │         │
+   16 Jun      │       204│ $25.00│  $5,100.00│   12.71%│yes             │  │            │         │
+   17 Jul      │       197│ $25.50│  $5,023.50│   -1.50%│yes             │  │            │         │
+   18 Aug      │       223│ $25.50│  $5,686.50│   13.20%│yes             │  │            │         │
+   19 Sep      │       241│ $26.00│  $6,266.00│   10.19%│yes             │  │            │         │
+   20 Oct      │       236│ $26.00│  $6,136.00│   -2.07%│yes             │  │            │         │
+   21 Nov      │       268│ $26.50│  $7,102.00│   15.74%│yes             │  │            │         │
+   22 Dec      │       312│ $27.00│  $8,424.00│   18.61%│yes             │  │            │         │
+   23 Total    │      2429│ $25.54│ $62,027.00│  192.50%│7 of 12         │  │            │         │
+   24          │          │       │           │         │                │  │            │         │
+   25          │          │       │           │         │                │  │            │         │
+ Sheet1 │                                                                                           
+ READY  A1  Item                 F2 edit · Ctrl+F find · : commands · Alt+H menu · q quit  Count: 1 

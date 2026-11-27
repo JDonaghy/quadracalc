@@ -28,27 +28,33 @@ use gridcraft_engine::catalog::CATALOG;
 use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::interactive::SubTarget;
-use quadraui::primitive::{LayoutCtx, Units};
+use quadraui::primitive::{LayoutCtx, Primitive, Size, Units};
 use quadraui::primitives::cell_grid::CellEditState;
+use quadraui::primitives::context_menu::{ContextMenuEvent, ContextMenuState};
+use quadraui::primitives::text_field::{TextFieldAction, TextFieldState};
 use quadraui::{
     AppLogic, AppMenu, AppMenuEvent, AppMenuState, Backend, ButtonMask, Cell, CellGrid,
-    CellGridEvent, CellGridPrimitiveLayout, CellGridState, CellStyle, Chart, Color,
-    DrawsPrimitives, EditOp, EventCx, EventHost, Handled, Interactive, Key, KeyEvent, ListViewHit,
-    Modifiers, MouseButton, NamedKey, Point, PointerKind, PointerShape, Reaction, Rect,
-    RoutedEvent, ScreenLayout, SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar,
-    TabBarHit, TextField, UiEvent, WidgetId, resolve_bar_height,
+    CellGridEvent, CellGridHit, CellGridPrimitiveLayout, CellGridState, Chart, Color, ContextMenu,
+    ContextMenuItem, DrawsPrimitives, EditOp, EventCx, EventHost, FindReplaceEvent,
+    FindReplaceField, Handled, Interactive, Key, KeyEvent, ListViewHit, Modifiers, MouseButton,
+    NamedKey, Point, PointerKind, PointerShape, Reaction, Rect, RoutedEvent, ScreenLayout,
+    SidebarPanelHit, StatusBar, StatusBarSegment, StyledText, Surface, TabBar, TabBarHit,
+    TextField, UiEvent, WidgetId, resolve_bar_height,
 };
 use serde_json::{Value, json};
 
 use crate::address::Address;
 use crate::agent;
+use crate::cell_style;
 use crate::chart_view;
 use crate::clipboard;
+use crate::find::{self, FindBar};
 use crate::format_picker::{self, FormatPicker, PickerOutcome};
 use crate::formula_bar::{self, Bands};
 use crate::function_picker::{self, FunctionPicker, Outcome as FunctionPickerOutcome};
 use crate::menu;
 use crate::palette::{CommandPalette, Outcome as PaletteOutcome};
+use crate::sheet_view::SheetView;
 use crate::sheets;
 use crate::sidebar::{self, Sidebar};
 
@@ -136,6 +142,28 @@ pub struct CalcApp {
     /// [`AppMenu`]'s own [`Interactive::State`] — the open dropdown's
     /// type-ahead buffer.
     app_menu_state: AppMenuState,
+    /// Zebra-stripe the grid's body rows ([`CellGrid::striped`]). On by
+    /// default; a workbook has no setting of its own for it.
+    striped: bool,
+    /// The find/replace panel while it's open — see `crate::find`.
+    find: Option<FindBar>,
+    /// The open find panel's matches on the active sheet, in reading
+    /// order, recomputed whenever the query, its options or the sheet
+    /// change.
+    find_hits: Vec<(usize, usize)>,
+    /// The grid's right-click (or Shift+F10) menu while it's open, and
+    /// the box it was placed in.
+    context_menu: Option<(ContextMenu, Rect)>,
+    /// [`ContextMenu`]'s own [`Interactive::State`] — its type-ahead
+    /// buffer.
+    context_menu_state: ContextMenuState,
+    /// Wheel travel not yet turned into whole rows/columns, so a
+    /// trackpad's sub-row deltas add up instead of being dropped or each
+    /// rounded up to a full row.
+    wheel_carry: (f32, f32),
+    /// The formula bar's own [`TextField`] state — its caret and a
+    /// pointer drag in progress — while the formula bar owns the edit.
+    formula_state: TextFieldState,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -175,6 +203,11 @@ pub struct View {
     /// `formula_bar::build_field`).
     pub formula: TextField,
     pub error: Option<String>,
+    /// What the keyboard is driving right now — the status bar's mode
+    /// badge and the key hints beside it follow it.
+    pub mode: Mode,
+    /// Whether this frame is for a terminal, where `:` opens the palette.
+    pub tui_shaped: bool,
     /// The active sheet's charts (`crate::chart_view::charts`), resolved
     /// fresh on every `refresh` — empty when it has none, which is also
     /// what tells [`CalcApp::grid_rect`] and [`View::screen`] not to
@@ -182,6 +215,40 @@ pub struct View {
     /// doc for why this is a quadraui [`Chart`] already resolved to
     /// plain numbers, not the engine's own `Chart` model.
     pub charts: Vec<Chart>,
+}
+
+/// What the keyboard is driving, as the status bar names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// Moving around the grid.
+    #[default]
+    Ready,
+    /// An in-progress cell edit, in the cell or the formula bar.
+    Edit,
+    /// The find/replace panel has the keyboard.
+    Find,
+}
+
+impl Mode {
+    fn badge(self) -> &'static str {
+        match self {
+            Mode::Ready => " READY ",
+            Mode::Edit => " EDIT ",
+            Mode::Find => " FIND ",
+        }
+    }
+
+    /// The keys worth knowing in this mode — the status bar's help line.
+    /// `tui` picks the terminal's own palette key (`:`) over the
+    /// chord every backend accepts.
+    fn hints(self, tui: bool) -> &'static str {
+        match self {
+            Mode::Ready if tui => " F2 edit · Ctrl+F find · : commands · Alt+H menu · q quit ",
+            Mode::Ready => " F2 edit · Ctrl+F find · Ctrl+Shift+P commands · q quit ",
+            Mode::Edit => " Enter commit · Esc cancel · Tab next · Ctrl+A all ",
+            Mode::Find => " Enter next · Shift+Enter prev · Esc close ",
+        }
+    }
 }
 
 impl CalcApp {
@@ -212,19 +279,28 @@ impl CalcApp {
             sidebar: Sidebar::default(),
             app_menu,
             app_menu_state: AppMenuState::default(),
+            striped: true,
+            find: None,
+            find_hits: Vec::new(),
+            context_menu: None,
+            context_menu_state: ContextMenuState::default(),
+            wheel_carry: (0.0, 0.0),
+            formula_state: TextFieldState::default(),
         }
     }
 
-    /// A workbook with a small sample, so a first launch shows a live
-    /// formula — and enough range (headers, a lookup table, a formula
-    /// chain) to be worth a screenshot of the ribbon-style surface this
-    /// app adds over the engine's bare grid: a bold+filled header row, an
-    /// explicit currency number format (not just the `$`-prefix
-    /// autodetect `B2`'s literal input already gets), and a `SUM` feeding
-    /// a `VLOOKUP` against a small rate table. `A1:B4` keeps its original
-    /// cells and formula (`editing.rs`, `open_save.rs` and others assert
-    /// on `=SUM(B2:B3)` and its typed inputs by name); everything new
-    /// lives in the previously-empty columns/rows around it.
+    /// A workbook with a sample sheet worth a first look: a frozen,
+    /// filled header row and a frozen label column, formulas (`SUM`, a
+    /// `VLOOKUP` against a rate table, per-row products, month-on-month
+    /// growth, `INDEX`/`MATCH` over the year), currency and percentage
+    /// number formats, and column widths sized to their contents — every
+    /// one of them set through the engine's own commands, the same ones
+    /// the menu and palette run.
+    ///
+    /// `A1:B4` keeps its original cells and formula (`editing.rs`,
+    /// `open_save.rs` and others assert on `=SUM(B2:B3)` and its typed
+    /// inputs by name), as do the `A6:B8` rate table and the `D1:F2`
+    /// lookup chain; the monthly table below them is additive.
     pub fn with_sample() -> anyhow::Result<Self> {
         let mut app = Self::new();
         for (cell, input) in [
@@ -253,19 +329,113 @@ impl CalcApp {
         ] {
             app.set_cell(cell, input)?;
         }
-        // Bold, filled header row — the Home-tab commands the format
-        // picker now supplies a parameter for (see `format_picker.rs`).
-        app.execute("home.bold", json!({ "range": "A1:B1", "on": true }))?;
-        app.execute(
-            "home.fillColor",
-            json!({ "range": "A1:B1", "color": "#D9E8F5" }),
-        )?;
-        // An explicit currency number format on the cost column, rather
-        // than relying only on `B2`'s typed `$` prefix.
-        app.execute(
-            "home.numberFormat",
-            json!({ "range": "B2:B4", "format": "Currency" }),
-        )?;
+
+        // A year of sales: units and price typed in, revenue and growth
+        // computed, a totals row, and a best-month lookup beside it.
+        const MONTHS: [(&str, u32, f64); 12] = [
+            ("Jan", 120, 24.0),
+            ("Feb", 135, 24.0),
+            ("Mar", 160, 24.5),
+            ("Apr", 152, 24.5),
+            ("May", 181, 25.0),
+            ("Jun", 204, 25.0),
+            ("Jul", 197, 25.5),
+            ("Aug", 223, 25.5),
+            ("Sep", 241, 26.0),
+            ("Oct", 236, 26.0),
+            ("Nov", 268, 26.5),
+            ("Dec", 312, 27.0),
+        ];
+        for (cell, input) in [
+            ("A10", "Month"),
+            ("B10", "Units"),
+            ("C10", "Price"),
+            ("D10", "Revenue"),
+            ("E10", "Growth"),
+            ("F10", "Over target?"),
+            ("H10", "At a glance"),
+            ("H11", "Best month"),
+            ("I11", "=INDEX(A11:A22,MATCH(MAX(D11:D22),D11:D22,0))"),
+            ("H12", "Peak revenue"),
+            ("I12", "=MAX(D11:D22)"),
+            ("H13", "Avg units"),
+            ("I13", "=ROUND(AVERAGE(B11:B22),1)"),
+            ("H14", "Target"),
+            ("I14", "5000"),
+            ("A23", "Total"),
+            ("B23", "=SUM(B11:B22)"),
+            ("C23", "=D23/B23"),
+            ("D23", "=SUM(D11:D22)"),
+            ("E23", "=D22/D11-1"),
+            ("F23", "=COUNTIF(F11:F22,\"yes\")&\" of 12\""),
+        ] {
+            app.set_cell(cell, input)?;
+        }
+        for (i, (month, units, price)) in MONTHS.iter().enumerate() {
+            let row = 11 + i;
+            app.set_cell(&format!("A{row}"), month)?;
+            app.set_cell(&format!("B{row}"), &units.to_string())?;
+            app.set_cell(&format!("C{row}"), &price.to_string())?;
+            app.set_cell(&format!("D{row}"), &format!("=B{row}*C{row}"))?;
+            if row > 11 {
+                app.set_cell(&format!("E{row}"), &format!("=D{row}/D{}-1", row - 1))?;
+            }
+            app.set_cell(
+                &format!("F{row}"),
+                &format!("=IF(D{row}>=$I$14,\"yes\",\"no\")"),
+            )?;
+        }
+
+        // Header bands: bold white on a dark fill for the frozen top row,
+        // a lighter accent for the monthly table's own header.
+        for (range, fill) in [
+            ("A1:F1", "#1F4E79"),
+            ("A10:F10", "#2E75B6"),
+            ("H10:I10", "#2E75B6"),
+        ] {
+            app.execute("home.bold", json!({ "range": range, "on": true }))?;
+            app.execute("home.fillColor", json!({ "range": range, "color": fill }))?;
+            app.execute(
+                "home.fontColor",
+                json!({ "range": range, "color": "#FFFFFF" }),
+            )?;
+        }
+        for range in ["A4:B4", "A6:B6", "A23:F23", "H11:H14"] {
+            app.execute("home.bold", json!({ "range": range, "on": true }))?;
+        }
+        app.execute("home.alignCenter", json!({ "range": "B10:F10" }))?;
+        app.execute("home.italic", json!({ "range": "D2", "on": true }))?;
+        for (range, format) in [
+            ("B2:B4", "Currency"),
+            ("F2", "Currency"),
+            ("C11:D23", "Currency"),
+            ("I12", "Currency"),
+            ("I14", "Currency"),
+            ("E2", "Percentage"),
+            ("E11:E23", "Percentage"),
+        ] {
+            app.execute(
+                "home.numberFormat",
+                json!({ "range": range, "format": format }),
+            )?;
+        }
+        // In the engine's own 96-dpi pixels (a default column is 64px);
+        // the grid scales them to its own units (see `crate::sheet_view`).
+        for (cols, px) in [
+            ("A:A", 80),
+            ("B:B", 88),
+            ("C:C", 64),
+            ("D:D", 96),
+            ("E:E", 80),
+            ("F:F", 136),
+            ("G:G", 16),
+            ("H:H", 104),
+            ("I:I", 88),
+        ] {
+            app.execute("home.columnWidth", json!({ "cols": cols, "width": px }))?;
+        }
+        // Row 1 and column A stay put while the rest scrolls.
+        app.execute("view.freezePanes", json!({ "cell": "B2" }))?;
         Ok(app)
     }
 
@@ -365,45 +535,19 @@ impl CalcApp {
     }
 
     /// This cell's grid presentation: [`Self::cell_text`]'s display text
-    /// plus the `Style` fields [`quadraui::CellGrid`] itself can paint —
-    /// bold and an explicit solid fill colour, read off the same
-    /// `cell.get` call `cell_text` would otherwise make a second time,
-    /// so a visible cell's style costs nothing extra over its text.
-    ///
-    /// Only [`gridcraft_engine::model::Color::Rgb`] (what
-    /// `crate::format_picker`'s colour choices and a plain hex literal
-    /// in a loaded file both produce) resolves to a paintable colour;
-    /// `Auto` and a theme-tinted `Theme(..)` both come back `None`
-    /// (inherit the grid's own default) — resolving a theme tint needs
-    /// the workbook's theme palette, which has no `Session::execute`
-    /// query to read it back through, only ribbon commands that set it.
+    /// plus whatever of its style [`quadraui::CellGrid`] can paint (see
+    /// `crate::cell_style`), read off the same `cell.get` call
+    /// `cell_text` would otherwise make a second time, so a visible
+    /// cell's style costs nothing extra over its text.
     fn grid_cell(&mut self, a1: &str) -> Cell {
         let Ok(cell) = self.session.execute("cell.get", json!({ "cell": a1 })) else {
             return Cell::plain(String::new());
         };
         let text = cell.get("text").and_then(Value::as_str).unwrap_or_default();
         let text = Self::checkbox_glyph(&cell, text).unwrap_or_else(|| text.to_string());
-
-        let style = cell.get("style");
-        let bold = style
-            .and_then(|s| s.get("font"))
-            .and_then(|f| f.get("bold"))
-            .and_then(Value::as_bool);
-        let bg = style
-            .and_then(|s| s.get("fill"))
-            .filter(|fill| fill.get("pattern").and_then(Value::as_str) == Some("Solid"))
-            .and_then(|fill| fill.get("fg"))
-            .and_then(|c| c.get("Rgb"))
-            .and_then(Value::as_u64)
-            .map(|rgb| Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
-
         Cell {
             text,
-            style: CellStyle {
-                bold,
-                bg,
-                ..CellStyle::default()
-            },
+            style: cell_style::from_engine(cell.get("style")),
         }
     }
 
@@ -606,13 +750,12 @@ impl CalcApp {
     fn type_key_into_grid(&mut self, key: Key, backend: &mut dyn Backend) -> Reaction {
         let rect = self.grid_rect(backend);
         let layout = Self::grid_layout(&self.grid, backend, rect);
-        let units = Self::units(backend);
         let routed = RoutedEvent::Key(KeyEvent {
             key,
             modifiers: Modifiers::default(),
             repeat: false,
         });
-        self.dispatch_to_grid(routed, &layout, units)
+        self.dispatch_to_grid(routed, &layout, backend)
     }
 
     pub fn view(&self) -> &View {
@@ -627,6 +770,26 @@ impl CalcApp {
         let vp = backend.viewport();
         let h = resolve_bar_height(backend.chrome_line_height()).min(vp.height);
         Rect::new(0.0, 0.0, vp.width, h)
+    }
+
+    /// The name box's width: room for a range like `D11:D22` plus the
+    /// `fx` marker.
+    fn name_box_width(backend: &dyn Backend) -> f32 {
+        if Self::is_tui_shaped(backend) {
+            14.0
+        } else {
+            backend.char_width() * 16.0
+        }
+    }
+
+    /// `(name box, formula field)`: the formula band split at
+    /// `name_box_width` (never more than half the band).
+    fn split_formula_band(band: Rect, name_box_width: f32) -> (Rect, Rect) {
+        let w = name_box_width.min(band.width / 2.0).max(0.0);
+        (
+            Rect::new(band.x, band.y, w, band.height),
+            Rect::new(band.x + w, band.y, band.width - w, band.height),
+        )
     }
 
     /// Recovers the `&'static str` [`CATALOG`] holds for `id`, since a
@@ -857,8 +1020,25 @@ impl CalcApp {
         let (row_height, col_width) = Self::cell_size(backend);
         self.grid.default_row_height = row_height;
         self.grid.default_col_width = col_width;
+        // Frozen panes, gridlines and column widths are the active
+        // sheet's own (saved with the workbook, set through View/Home
+        // commands); zebra striping is this app's.
+        if let Some(sheet_view) = SheetView::read(&self.session, col_width) {
+            sheet_view.apply(&mut self.grid);
+        }
+        self.grid.striped = self.striped;
         let rect = self.grid_rect(backend);
         let layout = Self::grid_layout(&self.grid, backend, rect).layout;
+        // A trailing space on each visible row's number, so it doesn't
+        // run straight into column A's text: the TUI painter
+        // right-aligns row numbers flush against the gutter's edge.
+        if Self::is_tui_shaped(backend) {
+            self.grid.row_labels = layout
+                .rows
+                .iter()
+                .map(|r| (r.index, format!("{} ", r.index + 1)))
+                .collect();
+        }
         let cells: Vec<Vec<Cell>> = layout
             .rows
             .iter()
@@ -942,11 +1122,18 @@ impl CalcApp {
         // `sheet.read` per series) to pay for twice a frame.
         let charts = std::mem::take(&mut self.view.charts);
 
+        // An open find panel's matches follow edits, undo and sheet
+        // switches, and its "n of m" follows the cursor.
+        if self.find.is_some() {
+            self.search(false, backend);
+        }
+
         // Re-classify against the engine's current state — e.g. "Undo"
         // greys out the instant there's nothing left to undo. Cheap
         // enough to rebuild every refresh (same cost the palette already
         // pays every time it opens) rather than tracking what changed.
-        self.app_menu.set_menus(menu::menus(&self.session));
+        self.app_menu
+            .set_menus(menu::menus_for(&self.session, self.striped));
 
         self.view = View {
             grid: Some(grid),
@@ -959,6 +1146,8 @@ impl CalcApp {
             active_text,
             formula,
             error: self.error.clone(),
+            mode: self.mode(),
+            tui_shaped: Self::is_tui_shaped(backend),
         };
 
         if let Ok(doc) = self.session.doc() {
@@ -969,6 +1158,17 @@ impl CalcApp {
             {
                 self.last_title = Some(title);
             }
+        }
+    }
+
+    /// What the keyboard is driving right now — see [`Mode`].
+    fn mode(&self) -> Mode {
+        if self.find.as_ref().is_some_and(|f| f.focused) {
+            Mode::Find
+        } else if self.grid.editing.is_some() {
+            Mode::Edit
+        } else {
+            Mode::Ready
         }
     }
 
@@ -1025,12 +1225,12 @@ impl Default for CalcApp {
 /// checks), so only [`Self::emit`] (an extra `UiEvent::CellGrid` a
 /// commit's `cx.emit` call attaches alongside its own
 /// `CellEditCommitted`) carries anything real.
-struct GridHost {
+struct WidgetHost {
     units: Units,
     emitted: Vec<UiEvent>,
 }
 
-impl GridHost {
+impl WidgetHost {
     fn new(units: Units) -> Self {
         Self {
             units,
@@ -1039,7 +1239,7 @@ impl GridHost {
     }
 }
 
-impl EventHost for GridHost {
+impl EventHost for WidgetHost {
     fn is_focused(&self, _id: &WidgetId, _sub: Option<SubTarget>) -> bool {
         false
     }
@@ -1066,10 +1266,15 @@ impl EventHost for GridHost {
 impl View {
     /// The whole screen as `ScreenLayout` surfaces, back to front:
     /// formula bar, grid, chart panel, tab strip, status bar.
-    fn screen(&self, bands: Bands) -> ScreenLayout {
+    fn screen(&self, bands: Bands, name_box_width: f32, char_width: f32) -> ScreenLayout {
         let mut layout = ScreenLayout::new();
+        let (name_box, field) = CalcApp::split_formula_band(bands.formula, name_box_width);
         layout.push(Surface::Widget {
-            rect: bands.formula,
+            rect: name_box,
+            widget: Box::new(self.name_box()),
+        });
+        layout.push(Surface::Widget {
+            rect: field,
             widget: Box::new(self.formula.clone()),
         });
         let (grid_rect, tab_bar_rect) = CalcApp::carve_tab_strip(bands);
@@ -1098,20 +1303,64 @@ impl View {
                 widget: Box::new(bar.clone()),
             });
         }
-        layout.push(self.status_surface(bands.status));
+        layout.push(self.status_surface(bands.status, char_width));
         layout
     }
 
-    fn status_surface(&self, rect: Rect) -> Surface {
+    /// The formula bar's leading name box: the cursor's address (or the
+    /// selected range) and an `fx` marker, the way a spreadsheet labels
+    /// the field beside it.
+    fn name_box(&self) -> StatusBar {
+        StatusBar {
+            id: WidgetId::new("name-box"),
+            left_segments: vec![
+                StatusBarSegment {
+                    text: format!(" {:<8} ", self.selection_label),
+                    fg: Color::rgb(255, 255, 255),
+                    bg: Color::rgb(31, 78, 121),
+                    bold: true,
+                    action_id: None,
+                },
+                StatusBarSegment {
+                    text: " fx ".into(),
+                    fg: Color::rgb(160, 190, 220),
+                    bg: Color::rgb(24, 40, 60),
+                    bold: false,
+                    action_id: None,
+                },
+            ],
+            right_segments: vec![],
+        }
+    }
+
+    /// The status bar: mode badge, selection, the cursor cell's formula
+    /// and value (or the last error) on the left; key hints and the
+    /// selection summary on the right. The hints only show while
+    /// everything fits in `rect` at `char_width` per character — they
+    /// are the first thing to give way to an error or a long formula.
+    fn status_surface(&self, rect: Rect, char_width: f32) -> Surface {
         let detail = match (&self.error, self.active_input.starts_with('=')) {
             (Some(err), _) => format!(" {err} "),
             (None, true) => format!(" {}  →  {} ", self.active_input, self.active_text),
             (None, false) => format!(" {} ", self.active_input),
         };
         let bar_bg = Color::rgb(33, 66, 110);
+        let badge_bg = match (self.error.is_some(), self.mode) {
+            (true, _) => Color::rgb(160, 40, 40),
+            (false, Mode::Ready) => Color::rgb(20, 45, 80),
+            (false, Mode::Edit) => Color::rgb(140, 90, 10),
+            (false, Mode::Find) => Color::rgb(30, 110, 70),
+        };
         let bar = StatusBar {
             id: WidgetId::new("status"),
             left_segments: vec![
+                StatusBarSegment {
+                    text: self.mode.badge().into(),
+                    fg: Color::rgb(255, 255, 255),
+                    bg: badge_bg,
+                    bold: true,
+                    action_id: None,
+                },
                 StatusBarSegment {
                     text: format!(" {} ", self.selection_label),
                     fg: Color::rgb(255, 255, 255),
@@ -1120,7 +1369,7 @@ impl View {
                     action_id: None,
                 },
                 StatusBarSegment {
-                    text: detail,
+                    text: detail.clone(),
                     fg: Color::rgb(230, 230, 230),
                     bg: bar_bg,
                     bold: false,
@@ -1132,18 +1381,32 @@ impl View {
                 // priority to stay visible on a narrow bar) last — see
                 // `StatusBarSegment`'s own doc on `right_segments`
                 // ordering. The selection summary is the one Excel users
-                // actually look for here, so it goes last/rightmost;
-                // the branding stays but yields first on a narrow bar.
-                let mut right = vec![StatusBarSegment {
-                    text: " quadracalc · GridCraft engine · q quits ".into(),
-                    fg: Color::rgb(200, 210, 225),
-                    bg: bar_bg,
-                    bold: false,
-                    action_id: None,
-                }];
-                if !self.selection_stats.is_empty() {
+                // actually look for here, so it goes last/rightmost; the
+                // key hints yield first on a narrow bar.
+                let stats = if self.selection_stats.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {} ", self.selection_stats)
+                };
+                let used = self.mode.badge().chars().count()
+                    + self.selection_label.chars().count()
+                    + 2
+                    + detail.chars().count()
+                    + stats.chars().count()
+                    + self.mode.hints(self.tui_shaped).chars().count();
+                let mut right = Vec::new();
+                if used as f32 * char_width.max(1.0) <= rect.width {
                     right.push(StatusBarSegment {
-                        text: format!(" {} ", self.selection_stats),
+                        text: self.mode.hints(self.tui_shaped).into(),
+                        fg: Color::rgb(200, 210, 225),
+                        bg: bar_bg,
+                        bold: false,
+                        action_id: None,
+                    });
+                }
+                if !stats.is_empty() {
+                    right.push(StatusBarSegment {
+                        text: stats,
                         fg: Color::rgb(255, 255, 255),
                         bg: Color::rgb(20, 45, 80),
                         bold: false,
@@ -1176,7 +1439,9 @@ impl AppLogic for CalcApp {
 
     fn render(&self, backend: &mut dyn Backend, _area: ()) {
         let bands = self.content_bands(backend);
-        let mut layout = self.view.screen(bands);
+        let mut layout =
+            self.view
+                .screen(bands, Self::name_box_width(backend), backend.char_width());
         // Docked chrome, same z-order tier as the grid/tab strip
         // `screen` just pushed — not an overlay, so it paints before
         // the palette/format-picker checks below rather than after.
@@ -1196,6 +1461,16 @@ impl AppLogic for CalcApp {
                     &self.view.sidebar_names,
                     self.sidebar.selected(),
                 )),
+            });
+        }
+        // The find panel floats over the grid's top-right corner, under
+        // any modal overlay below.
+        if let Some(bar) = &self.find {
+            let group = self.grid_rect(backend);
+            let panel = bar.panel_in(group);
+            layout.push(Surface::Widget {
+                rect: panel.anchored_rect(backend, group),
+                widget: Box::new(panel),
             });
         }
         // On top of everything else — the palette is a modal overlay,
@@ -1243,6 +1518,14 @@ impl AppLogic for CalcApp {
             rect: menu_bar_rect,
             widget: Box::new(self.app_menu.build_menu_bar()),
         });
+        // The grid's context menu, over everything but the menu bar's
+        // own dropdown (the two never show at once).
+        if let Some((menu, rect)) = &self.context_menu {
+            layout.push(Surface::Widget {
+                rect: *rect,
+                widget: Box::new(menu.clone()),
+            });
+        }
         let _ = layout.draw(backend);
         // The one thing the bar above can't carry: an open dropdown's
         // actual cascade. `AppMenu::handle_ui_event` puts an open
@@ -1281,27 +1564,9 @@ impl AppLogic for CalcApp {
                 }
                 PaletteOutcome::Run(id) => {
                     self.palette = None;
-                    // Same "Paste" special case the menu's own
-                    // `Activated` dispatch uses — see
-                    // `clipboard::paste_from_system`'s own doc for why
-                    // this id can't go through a generic `execute`.
-                    let result = if id == "edit.paste" {
-                        clipboard::paste_from_system(self, backend)
-                    } else {
-                        // The palette was classified and is now run
-                        // against the UI's own selection, not
-                        // necessarily the one the engine still has
-                        // cached from the last `cell.set`/`edit.undo` —
-                        // see `sync_selection`'s own doc.
-                        self.sync_selection()
-                            .and_then(|()| self.execute(id, json!({})))
-                            .map(|_| ())
-                    };
-                    if let Err(e) = result {
-                        self.error = Some(e.to_string());
-                    }
-                    self.refresh(backend);
-                    Reaction::Redraw
+                    // The same dispatch a menu click takes — see
+                    // `run_command_id`.
+                    self.run_command_id(id, backend)
                 }
                 PaletteOutcome::Pick(id) => {
                     self.palette = None;
@@ -1381,6 +1646,10 @@ impl AppLogic for CalcApp {
                 FunctionPickerOutcome::Ignored => Reaction::Continue,
             };
         }
+        // The grid's context menu is modal while open, like the palette.
+        if self.context_menu.is_some() {
+            return self.handle_context_menu_event(&event, backend);
+        }
         // The menu bar takes priority over everything below — Alt+key
         // mnemonics and in-dropdown arrow/Enter navigation must work no
         // matter what else is focused, the same precedence `quadraui`'s
@@ -1408,96 +1677,8 @@ impl AppLogic for CalcApp {
                 backend,
                 menu_bar_rect,
             ) {
-                Handled::Event(AppMenuEvent::Activated(id)) if id.as_str() == menu::QUIT => {
-                    return Reaction::Exit;
-                }
                 Handled::Event(AppMenuEvent::Activated(id)) => {
-                    let id_str = id.as_str();
-                    // Same "open a picker instead of running it" branch the
-                    // palette's own `PaletteOutcome::Pick` uses — a menu
-                    // click on Font/Font Size/Fill Color/Font Color/Borders/
-                    // Draw Border/Number Format needs the same parameter
-                    // dialog, just reached from the menu instead of the
-                    // palette. `catalog_id` recovers the `&'static str` the
-                    // catalog's own id table holds, since `WidgetId` only
-                    // ever gives back a borrowed `&str` and `FormatPicker::
-                    // open` wants the former.
-                    if format_picker::has_picker(id_str) {
-                        match Self::catalog_id(id_str) {
-                            Some(cid) => self.format_picker = FormatPicker::open(cid),
-                            // Unreachable today — `menu::tab_items` only ever
-                            // builds items from `CATALOG` itself, so every id
-                            // it hands back resolves here by construction.
-                            // Surfaced rather than silently dropped in case a
-                            // future catalog id rename ever desyncs the two.
-                            None => {
-                                self.error = Some(format!("no catalog entry for \"{id_str}\""));
-                            }
-                        }
-                        self.refresh(backend);
-                        return Reaction::Redraw;
-                    }
-                    // Same "open a picker instead of running it" branch
-                    // the palette's own `PaletteOutcome::PickFunction`
-                    // uses — the seven Function Library category ids
-                    // are `cmd!(query ...)` wrappers whose result would
-                    // be discarded by the generic arm below, and
-                    // `formulas.insertFunction` only pushes a
-                    // `UiRequest::Dialog` nothing in this crate reads.
-                    // `function_picker::has_picker` and
-                    // `open_function_picker` already exist for exactly
-                    // this; see their own docs.
-                    if function_picker::has_picker(id_str) {
-                        match Self::catalog_id(id_str) {
-                            Some(cid) => match self.open_function_picker(cid) {
-                                Ok(picker) => self.function_picker = Some(picker),
-                                Err(e) => self.error = Some(e.to_string()),
-                            },
-                            // Unreachable today, for the same reason as
-                            // the `format_picker::has_picker` arm above.
-                            None => {
-                                self.error = Some(format!("no catalog entry for \"{id_str}\""));
-                            }
-                        }
-                        self.refresh(backend);
-                        return Reaction::Redraw;
-                    }
-                    // `sync_selection` before running a catalog command
-                    // against no explicit range, same as the palette run
-                    // above — except for the ids this crate wraps in its
-                    // own helper instead of a bare `execute`: "Paste" needs
-                    // the system clipboard (see `menu::tab_items`'s and
-                    // `clipboard::paste_from_system`'s own docs), "Copy"/
-                    // "Cut" need `clipboard::copy`/`cut`'s mirror onto the
-                    // system clipboard (the same one `CalcApp::handle`'s
-                    // own Ctrl+C/X dispatch uses — a bare `execute` here
-                    // would silently stop populating the OS clipboard), and
-                    // "Save" needs `CalcApp::save`'s "nothing to save to
-                    // yet" handling (the same one Ctrl+S's dispatch uses).
-                    // Keeping all three in step with the keyboard path
-                    // matters most on macOS: a native `NSMenu` key
-                    // equivalent (see `menu::accelerator`'s own doc) bypasses
-                    // `handle`'s `KeyPressed` arms entirely and lands here
-                    // instead, so this arm is that shortcut's only path to
-                    // the engine on that platform.
-                    let result = if id_str == "edit.paste" {
-                        clipboard::paste_from_system(self, backend)
-                    } else if id_str == "edit.copy" {
-                        clipboard::copy(self, backend)
-                    } else if id_str == "edit.cut" {
-                        clipboard::cut(self, backend)
-                    } else if id_str == "file.save" {
-                        self.save()
-                    } else {
-                        self.sync_selection()
-                            .and_then(|()| self.execute(id_str, json!({})))
-                            .map(|_| ())
-                    };
-                    if let Err(e) = result {
-                        self.error = Some(e.to_string());
-                    }
-                    self.refresh(backend);
-                    return Reaction::Redraw;
+                    return self.run_command_id(id.as_str(), backend);
                 }
                 Handled::Event(_) | Handled::Consumed => {
                     self.refresh(backend);
@@ -1505,6 +1686,26 @@ impl AppLogic for CalcApp {
                 }
                 Handled::Ignored => {}
             }
+        }
+        // Ctrl+F / Ctrl+H (Cmd on macOS) open find / find-and-replace
+        // over the sheet — or, already open, take the keyboard back.
+        // Outside an active edit, like every other shortcut here.
+        if self.grid.editing.is_none()
+            && let UiEvent::KeyPressed { key, modifiers, .. } = &event
+            && (modifiers.ctrl || modifiers.cmd)
+            && !modifiers.shift
+            && matches!(key, Key::Char('f' | 'F' | 'h' | 'H'))
+        {
+            self.open_find(matches!(key, Key::Char('h' | 'H')), backend);
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
+        if self.find.is_some()
+            && self.grid.editing.is_none()
+            && !self.formula_focused
+            && let Some(reaction) = self.route_to_find(&event, backend)
+        {
+            return reaction;
         }
         // Ctrl+Shift+P (Cmd+Shift+P on macOS), or a bare `:` on a
         // TUI-shaped backend, opens the palette — outside an active
@@ -1564,7 +1765,9 @@ impl AppLogic for CalcApp {
             position,
             ..
         } = &event
-            && Self::bands(backend).formula.contains(*position)
+            && Self::split_formula_band(Self::bands(backend).formula, Self::name_box_width(backend))
+                .1
+                .contains(*position)
         {
             if self.grid.editing.is_none() {
                 let a1 = self.cursor().a1();
@@ -1572,6 +1775,19 @@ impl AppLogic for CalcApp {
                 self.start_editing(text);
             }
             self.formula_focused = true;
+            // The press itself places the caret (and starts a drag-select)
+            // through the field's own pointer handling.
+            self.route_to_formula_field(&event, backend);
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
+        // A drag that started in the formula bar keeps extending its
+        // selection until the button comes up, wherever the pointer goes.
+        if self.formula_focused
+            && self.formula_state.dragging
+            && matches!(event, UiEvent::MouseMoved { .. } | UiEvent::MouseUp { .. })
+        {
+            self.route_to_formula_field(&event, backend);
             self.refresh(backend);
             return Reaction::Redraw;
         }
@@ -1626,6 +1842,58 @@ impl AppLogic for CalcApp {
             self.handle_sidebar_click(*position, rect, backend);
             self.refresh(backend);
             return Reaction::Redraw;
+        }
+        // Right-click on the grid (or Shift+F10 / the Menu key) opens
+        // its context menu — outside an active edit, so it never
+        // abandons one.
+        if self.grid.editing.is_none() && !self.formula_focused {
+            if let UiEvent::MouseDown {
+                button: MouseButton::Right,
+                position,
+                ..
+            } = &event
+                && self.grid_rect(backend).contains(*position)
+            {
+                self.open_context_menu_at_pointer(*position, backend);
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+            if let UiEvent::KeyPressed { key, modifiers, .. } = &event
+                && (matches!(key, Key::Named(NamedKey::Menu))
+                    || (modifiers.shift && matches!(key, Key::Named(NamedKey::F(10)))))
+            {
+                self.open_context_menu_at_cursor(backend);
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+        }
+        // The wheel scrolls the grid under the pointer without moving the
+        // cursor, the way a spreadsheet does.
+        if let UiEvent::Scroll {
+            delta, position, ..
+        } = &event
+            && self.grid_rect(backend).contains(*position)
+        {
+            self.scroll_grid(delta.x, delta.y);
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
+        // Double-click a cell to edit it in place, like F2.
+        if self.grid.editing.is_none()
+            && let UiEvent::DoubleClick { position, .. } = &event
+        {
+            let rect = self.grid_rect(backend);
+            if rect.contains(*position) {
+                let layout = Self::grid_layout(&self.grid, backend, rect);
+                if let CellGridHit::Cell(row, col) = layout.hit_test(position.x, position.y) {
+                    self.grid.cursor = (row, col);
+                    self.grid.selection_anchor = None;
+                    let text = self.cell_input(&Address::new(row as u32, col as u32).a1());
+                    self.start_editing(text);
+                }
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
         }
         // `q`/Escape quit only outside an active edit — while editing, `q`
         // is a character to insert and Escape cancels the edit instead
@@ -1819,7 +2087,6 @@ impl AppLogic for CalcApp {
         // no earlier check claimed) is left alone.
         let rect = self.grid_rect(backend);
         let layout = Self::grid_layout(&self.grid, backend, rect);
-        let units = Self::units(backend);
         let routed = match &event {
             UiEvent::MouseDown {
                 button: MouseButton::Left,
@@ -1864,7 +2131,7 @@ impl AppLogic for CalcApp {
         };
         match routed {
             Some(routed) => {
-                let reaction = self.dispatch_to_grid(routed, &layout, units);
+                let reaction = self.dispatch_to_grid(routed, &layout, backend);
                 if matches!(reaction, Reaction::Redraw) {
                     self.refresh(backend);
                 }
@@ -1916,12 +2183,17 @@ impl CalcApp {
     /// always agrees with [`Self::grid_layout`]. Mirrors quadraui's own
     /// `examples/common/cell_grid_demo.rs::layout_ctx`.
     fn units(backend: &dyn Backend) -> Units {
+        Self::layout_ctx(backend).units()
+    }
+
+    /// A [`LayoutCtx`] matching the one `DrawsPrimitives::layout_primitive`
+    /// builds — rebuilt here because quadraui keeps that one crate-private.
+    fn layout_ctx(backend: &dyn Backend) -> LayoutCtx<'_> {
         LayoutCtx::new(
             LayoutCtx::resolve_row_height(backend.chrome_line_height(), &backend.style()),
             backend.char_width(),
             backend.nerd_fonts_enabled(),
         )
-        .units()
     }
 
     /// `grid`'s layout at `rect`, resolved through the backend's own
@@ -1935,7 +2207,7 @@ impl CalcApp {
 
     /// Route one already-converted [`RoutedEvent`] into `self.grid`'s own
     /// [`CellGrid::handle`] and apply whatever [`CellGridEvent`] it
-    /// reports (plus every extra event [`GridHost::emit`] collected — see
+    /// reports (plus every extra event [`WidgetHost::emit`] collected — see
     /// that type's own doc for why nothing else it carries matters here).
     /// Mirrors quadraui's own
     /// `examples/common/cell_grid_demo.rs::CellGridDemo::dispatch_to_grid`.
@@ -1943,9 +2215,9 @@ impl CalcApp {
         &mut self,
         routed: RoutedEvent,
         layout: &CellGridPrimitiveLayout,
-        units: Units,
+        backend: &dyn Backend,
     ) -> Reaction {
-        let mut host = GridHost::new(units);
+        let mut host = WidgetHost::new(Self::units(backend));
         let handled = {
             let mut cx = EventCx::new(self.grid.id, &mut host);
             self.grid
@@ -1956,6 +2228,8 @@ impl CalcApp {
             Handled::Consumed => Reaction::Redraw,
             Handled::Ignored => Reaction::Continue,
         };
+        // A copy/cut out of the in-progress edit's selection.
+        self.copy_emitted_text(&host.emitted, backend);
         let grid_id = self.grid.id;
         for extra in host.emitted {
             if let UiEvent::CellGrid(id, event) = extra
@@ -2016,6 +2290,7 @@ impl CalcApp {
                 }
                 self.grid.editing = None;
                 self.formula_focused = false;
+                self.formula_state = TextFieldState::default();
                 Reaction::Redraw
             }
             // Escape cancelled the edit — whether it was typed through
@@ -2024,6 +2299,7 @@ impl CalcApp {
             CellGridEvent::CellEditCancelled { .. } => {
                 self.grid.editing = None;
                 self.formula_focused = false;
+                self.formula_state = TextFieldState::default();
                 Reaction::Redraw
             }
             // `CellsRequested` needs no action of its own: `Self::refresh`
@@ -2033,6 +2309,648 @@ impl CalcApp {
             // genuinely expensive data source might.
             _ => Reaction::Redraw,
         }
+    }
+
+    /// Open the find panel — with the replace row when `replace` — or,
+    /// already open, give it the keyboard back. Any open context menu or
+    /// menu dropdown closes first.
+    fn open_find(&mut self, replace: bool, backend: &mut dyn Backend) {
+        self.app_menu.dismiss(backend);
+        match &mut self.find {
+            Some(bar) => bar.refocus(replace),
+            None => self.find = Some(FindBar::open(replace, String::new())),
+        }
+        self.search(false, backend);
+    }
+
+    /// Re-run the search for the panel's current query and options,
+    /// jumping to the nearest match when `jump` (a query edit), and
+    /// update the panel's match count.
+    fn search(&mut self, jump: bool, backend: &mut dyn Backend) {
+        let Some(params) = self.find.as_ref().map(FindBar::find_all_params) else {
+            return;
+        };
+        let sheet = sheets::active_sheet_name(&self.session).unwrap_or_default();
+        self.find_hits = match params {
+            // `edit.find` errors on no match ("We couldn't find…"); that's
+            // an empty list here, not an error to show.
+            Some(params) => self
+                .execute("edit.find", params)
+                .map(|r| find::matches(&r, &sheet))
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        if jump && let Some(hit) = find::nearest(&self.find_hits, self.grid.cursor) {
+            self.go_to_cell(hit, backend);
+        }
+        self.update_match_info();
+    }
+
+    fn update_match_info(&mut self) {
+        let cursor = self.grid.cursor;
+        if let Some(bar) = &mut self.find {
+            bar.panel.match_info = bar.note.clone().unwrap_or_else(|| {
+                find::match_info(&self.find_hits, cursor, bar.panel.query.is_empty())
+            });
+            bar.panel.rebuild_hit_regions();
+        }
+    }
+
+    /// Step to the next (`forward`) or previous match.
+    fn find_step(&mut self, forward: bool, backend: &mut dyn Backend) {
+        if let Some(hit) = find::step(&self.find_hits, self.grid.cursor, forward) {
+            self.go_to_cell(hit, backend);
+        }
+        self.update_match_info();
+    }
+
+    /// Replace the match under the cursor (then step to the next one), or
+    /// every match when `all`, through `edit.replace`.
+    fn find_replace(&mut self, all: bool, backend: &mut dyn Backend) {
+        let Some(bar) = &self.find else { return };
+        if bar.panel.query.is_empty() {
+            return;
+        }
+        let params = bar.replace_params(all);
+        if !all && !self.find_hits.contains(&self.grid.cursor) {
+            self.find_step(true, backend);
+            return;
+        }
+        let result = self
+            .sync_selection()
+            .and_then(|()| self.execute("edit.replace", params));
+        match result {
+            Ok(r) => {
+                let replaced = r.get("replaced").and_then(Value::as_u64).unwrap_or(0);
+                self.search(false, backend);
+                if all {
+                    if let Some(bar) = &mut self.find {
+                        bar.note = Some(format!("Replaced {replaced}"));
+                    }
+                    self.update_match_info();
+                } else {
+                    self.find_step(true, backend);
+                }
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Move the cursor to `cell` (collapsing any selection) and scroll it
+    /// into view — where a find step lands.
+    fn go_to_cell(&mut self, cell: (usize, usize), backend: &dyn Backend) {
+        self.grid.cursor = cell;
+        self.grid.selection_anchor = None;
+        self.reveal(cell, backend);
+    }
+
+    /// Scroll so `cell` is on screen. A cell in a frozen row/column is
+    /// always on screen along that axis. `CellGrid` resolves this itself
+    /// for its own navigation, but keeps that private, so this walks the
+    /// scroll offset against the same layout `render` paints.
+    fn reveal(&mut self, (row, col): (usize, usize), backend: &dyn Backend) {
+        let rect = self.grid_rect(backend);
+        let (fr, fc) = (self.grid.frozen_rows, self.grid.frozen_cols);
+        if row >= fr && row < fr + self.grid.row_scroll {
+            self.grid.row_scroll = row - fr;
+        }
+        if col >= fc && col < fc + self.grid.col_scroll {
+            self.grid.col_scroll = col - fc;
+        }
+        // Bounded: each step brings the target at least one row/column
+        // closer, and a sheet is at most `row_count`/`col_count` away.
+        for _ in 0..(self.grid.row_count + self.grid.col_count) {
+            let layout = Self::grid_layout(&self.grid, backend, rect).layout;
+            let fully_visible = |spans: &[quadraui::ResolvedSpan], index: usize, extent: f32| {
+                spans
+                    .iter()
+                    .any(|s| s.index == index && s.start + s.size <= extent + 0.01)
+            };
+            let row_ok = row < fr
+                || fully_visible(&layout.rows, row, layout.viewport_height)
+                || layout.rows.len() <= layout.frozen_rows + 1;
+            let col_ok = col < fc
+                || fully_visible(&layout.cols, col, layout.viewport_width)
+                || layout.cols.len() <= layout.frozen_cols + 1;
+            if row_ok && col_ok {
+                break;
+            }
+            if !row_ok {
+                self.grid.row_scroll += 1;
+            }
+            if !col_ok {
+                self.grid.col_scroll += 1;
+            }
+        }
+    }
+
+    /// The find panel's box this frame: top-right of the grid.
+    fn find_rect(&self, backend: &dyn Backend) -> Option<Rect> {
+        let bar = self.find.as_ref()?;
+        let group = self.grid_rect(backend);
+        Some(bar.panel_in(group).anchored_rect(backend, group))
+    }
+
+    /// Route `event` to the open find panel when it's the panel's:
+    /// a press inside its box (which also gives it the keyboard), and
+    /// every key and paste while it has the keyboard. A press anywhere
+    /// else hands the keyboard back to the grid and falls through; with
+    /// the grid holding the keyboard, Escape closes the panel instead of
+    /// quitting. `None` for an event the panel doesn't take.
+    fn route_to_find(&mut self, event: &UiEvent, backend: &mut dyn Backend) -> Option<Reaction> {
+        let rect = self.find_rect(backend)?;
+        let focused = self.find.as_ref().is_some_and(|f| f.focused);
+        let routed = match event {
+            UiEvent::MouseDown {
+                button: MouseButton::Left,
+                position,
+                modifiers,
+                ..
+            } if rect.contains(*position) => {
+                if let Some(bar) = &mut self.find {
+                    bar.focused = true;
+                }
+                RoutedEvent::Pointer {
+                    kind: PointerKind::Down(MouseButton::Left),
+                    sub: None,
+                    local: Point::new(position.x - rect.x, position.y - rect.y),
+                    mods: *modifiers,
+                }
+            }
+            UiEvent::MouseDown { .. } => {
+                if let Some(bar) = &mut self.find {
+                    bar.focused = false;
+                }
+                return None;
+            }
+            UiEvent::WindowResized { .. } => return None,
+            UiEvent::KeyPressed { key, .. }
+                if !focused
+                    && self.grid.editing.is_none()
+                    && matches!(key, Key::Named(NamedKey::Escape)) =>
+            {
+                self.close_find();
+                self.refresh(backend);
+                return Some(Reaction::Redraw);
+            }
+            _ if !focused => return None,
+            UiEvent::KeyPressed {
+                key,
+                modifiers,
+                repeat,
+            } => RoutedEvent::Key(KeyEvent {
+                key: key.clone(),
+                modifiers: *modifiers,
+                repeat: *repeat,
+            }),
+            UiEvent::ClipboardPaste(text) => RoutedEvent::Text(text.clone()),
+            UiEvent::CharTyped(c) => RoutedEvent::Text(c.to_string()),
+            _ => return None,
+        };
+        let bar = self.find.as_ref()?;
+        let panel = bar.panel_in(self.grid_rect(backend));
+        let layout = backend.layout_primitive(rect, &panel);
+        let mut host = WidgetHost::new(Self::units(backend));
+        let handled = {
+            let mut cx = EventCx::new(panel.id, &mut host);
+            panel.handle(&mut (), &routed, &layout, &mut cx)
+        };
+        self.copy_emitted_text(&host.emitted, backend);
+        let reaction = match handled {
+            Handled::Event(e) => self.handle_find_event(e, backend),
+            Handled::Consumed => Reaction::Redraw,
+            Handled::Ignored => Reaction::Continue,
+        };
+        self.refresh(backend);
+        Some(reaction)
+    }
+
+    fn handle_find_event(
+        &mut self,
+        event: FindReplaceEvent,
+        backend: &mut dyn Backend,
+    ) -> Reaction {
+        if let Some(bar) = &mut self.find {
+            bar.note = None;
+        }
+        match &event {
+            FindReplaceEvent::Close => {
+                self.close_find();
+                return Reaction::Redraw;
+            }
+            FindReplaceEvent::NextMatch => self.find_step(true, backend),
+            FindReplaceEvent::PrevMatch => self.find_step(false, backend),
+            FindReplaceEvent::ReplaceCurrent => self.find_replace(false, backend),
+            FindReplaceEvent::ReplaceAll => self.find_replace(true, backend),
+            FindReplaceEvent::FieldEdited { .. } | FindReplaceEvent::Toggled { .. } => {}
+        }
+        let requery = match &event {
+            FindReplaceEvent::FieldEdited { field, text, .. } => {
+                *field == FindReplaceField::Find
+                    && self.find.as_ref().is_some_and(|f| f.panel.query != *text)
+            }
+            FindReplaceEvent::Toggled { .. } => true,
+            _ => false,
+        };
+        if let Some(bar) = &mut self.find {
+            bar.panel.apply_event(&event);
+        }
+        if requery {
+            self.search(true, backend);
+        }
+        Reaction::Redraw
+    }
+
+    fn close_find(&mut self) {
+        self.find = None;
+        self.find_hits.clear();
+    }
+
+    /// Hand any text a widget copied (a selection in a field, Ctrl+C) to
+    /// the system clipboard.
+    fn copy_emitted_text(&self, emitted: &[UiEvent], backend: &dyn Backend) {
+        for event in emitted {
+            if let UiEvent::TextCopied(text) = event {
+                backend.services().clipboard().write_text(text);
+            }
+        }
+    }
+
+    /// Route a pointer event on the formula bar through its
+    /// [`TextField`]'s own handling — click to place the caret, drag (or
+    /// Shift+click) to select — and write the resulting caret, selection
+    /// and text back onto the in-progress edit both the bar and the cell
+    /// show.
+    fn route_to_formula_field(&mut self, event: &UiEvent, backend: &mut dyn Backend) {
+        let Some(edit) = self.grid.editing.clone() else {
+            return;
+        };
+        let rect =
+            Self::split_formula_band(Self::bands(backend).formula, Self::name_box_width(backend)).1;
+        let local = |p: Point| Point::new(p.x - rect.x, p.y - rect.y);
+        let routed = match event {
+            UiEvent::MouseDown {
+                button: MouseButton::Left,
+                position,
+                modifiers,
+                ..
+            } => RoutedEvent::Pointer {
+                kind: PointerKind::Down(MouseButton::Left),
+                sub: None,
+                local: local(*position),
+                mods: *modifiers,
+            },
+            UiEvent::MouseMoved { position, .. } => RoutedEvent::Pointer {
+                kind: PointerKind::Move,
+                sub: None,
+                local: local(*position),
+                mods: Modifiers::default(),
+            },
+            UiEvent::MouseUp {
+                button: MouseButton::Left,
+                position,
+                ..
+            } => RoutedEvent::Pointer {
+                kind: PointerKind::Up(MouseButton::Left),
+                sub: None,
+                local: local(*position),
+                mods: Modifiers::default(),
+            },
+            _ => return,
+        };
+        let field = formula_bar::build_field(&edit.text, &self.grid, true);
+        let layout = backend.layout_primitive(rect, &field);
+        self.formula_state.cursor = Some(edit.cursor);
+        self.formula_state.anchor = edit.selection_anchor;
+        let mut host = WidgetHost::new(Self::units(backend));
+        let handled = {
+            let mut cx = EventCx::new(field.id, &mut host);
+            field.handle(&mut self.formula_state, &routed, &layout, &mut cx)
+        };
+        let text = match handled {
+            Handled::Event(TextFieldAction::Changed(text)) => text,
+            _ => edit.text.clone(),
+        };
+        let cursor = self
+            .formula_state
+            .cursor
+            .unwrap_or(edit.cursor)
+            .min(text.len());
+        let selection_anchor = self
+            .formula_state
+            .anchor
+            .filter(|&a| a != cursor && a <= text.len());
+        self.grid.editing = Some(CellEditState {
+            text,
+            cursor,
+            selection_anchor,
+            placeholder: edit.placeholder,
+        });
+    }
+
+    /// Scroll the grid by a wheel `delta` (positive `y` = toward the top),
+    /// three rows per notch, carrying any fraction over to the next
+    /// event. The cursor stays where it is.
+    fn scroll_grid(&mut self, dx: f32, dy: f32) {
+        const ROWS_PER_NOTCH: f32 = 3.0;
+        let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+        // Positive `y` scrolls toward the top; positive `x` toward the
+        // right (`quadraui::ScrollDelta`).
+        let rows = self.wheel_carry.1 + quadraui::wheel_delta(finite(dy), ROWS_PER_NOTCH);
+        let cols = self.wheel_carry.0 + finite(dx);
+        let (whole_rows, whole_cols) = (rows.trunc(), cols.trunc());
+        self.wheel_carry = (cols - whole_cols, rows - whole_rows);
+        let max_row = self
+            .grid
+            .row_count
+            .saturating_sub(self.grid.frozen_rows)
+            .saturating_sub(1);
+        let max_col = self
+            .grid
+            .col_count
+            .saturating_sub(self.grid.frozen_cols)
+            .saturating_sub(1);
+        let step = |at: usize, by: f32, max: usize| -> usize {
+            ((at as f32 + by).max(0.0) as usize).min(max)
+        };
+        self.grid.row_scroll = step(self.grid.row_scroll, whole_rows, max_row);
+        self.grid.col_scroll = step(self.grid.col_scroll, whole_cols, max_col);
+    }
+
+    /// The grid's right-click menu: clipboard, row/column structure,
+    /// clearing and formatting, and find — each item a catalog id
+    /// [`Self::run_command_id`] runs exactly as the menu bar would.
+    fn context_menu_items(&self) -> Vec<ContextMenuItem> {
+        let item = |id: &str, label: &str, detail: Option<&str>| ContextMenuItem {
+            id: Some(WidgetId::new(id)),
+            label: StyledText::plain(label),
+            detail: detail.map(StyledText::plain),
+            ..Default::default()
+        };
+        let sep = ContextMenuItem::default;
+        vec![
+            item("edit.cut", "Cut", Some("Ctrl+X")),
+            item("edit.copy", "Copy", Some("Ctrl+C")),
+            item("edit.paste", "Paste", Some("Ctrl+V")),
+            sep(),
+            item("home.insertRows", "Insert Row", None),
+            item("home.deleteRows", "Delete Row", None),
+            item("home.insertColumns", "Insert Column", None),
+            item("home.deleteColumns", "Delete Column", None),
+            sep(),
+            item("edit.clearContents", "Clear Contents", Some("Del")),
+            item("home.bold", "Bold", None),
+            item("home.numberFormat", "Number Format…", None),
+            sep(),
+            item("edit.find", "Find…", Some("Ctrl+F")),
+        ]
+    }
+
+    /// Open the context menu with its top-left at `at`, nudged to stay on
+    /// screen.
+    fn open_context_menu(&mut self, at: Point, backend: &mut dyn Backend) {
+        self.app_menu.dismiss(backend);
+        let mut menu = ContextMenu {
+            id: WidgetId::new("quadracalc-context-menu"),
+            items: self.context_menu_items(),
+            selected_idx: 0,
+            bg: None,
+            placement: Default::default(),
+            glyphs: Default::default(),
+        };
+        menu.selected_idx = menu.first_selectable();
+        let vp = backend.viewport();
+        let ctx = Self::layout_ctx(backend);
+        let size = Primitive::measure(&menu, &ctx, Size::new(vp.width, vp.height));
+        let w = size.width.unwrap_or(vp.width / 3.0).min(vp.width);
+        let h = size.height.unwrap_or(vp.height / 2.0).min(vp.height);
+        // Whole cells on a terminal: the menu paints snapped to the cell
+        // grid, so its hit-test rect must be snapped the same way.
+        let at = if Self::is_tui_shaped(backend) {
+            Point::new(at.x.floor(), at.y.floor())
+        } else {
+            at
+        };
+        let x = at.x.min(vp.width - w).max(0.0);
+        let y = at.y.min(vp.height - h).max(0.0);
+        self.context_menu = Some((menu, Rect::new(x, y, w, h)));
+        self.context_menu_state = ContextMenuState::default();
+    }
+
+    /// Right-click: a click outside the current selection moves the
+    /// cursor there first (one inside it keeps the selection, so the menu
+    /// acts on the whole range), then the menu opens at the pointer.
+    fn open_context_menu_at_pointer(&mut self, at: Point, backend: &mut dyn Backend) {
+        let rect = self.grid_rect(backend);
+        let layout = Self::grid_layout(&self.grid, backend, rect);
+        if let CellGridHit::Cell(row, col) = layout.hit_test(at.x, at.y) {
+            let (top, left, bottom, right) = self.grid.selection_bounds();
+            if !(top..=bottom).contains(&row) || !(left..=right).contains(&col) {
+                self.grid.cursor = (row, col);
+                self.grid.selection_anchor = None;
+            }
+        }
+        self.open_context_menu(at, backend);
+    }
+
+    /// Shift+F10 / the Menu key: the menu opens at the cursor cell.
+    fn open_context_menu_at_cursor(&mut self, backend: &mut dyn Backend) {
+        let rect = self.grid_rect(backend);
+        let layout = Self::grid_layout(&self.grid, backend, rect).layout;
+        let (row, col) = self.grid.cursor;
+        let y = layout
+            .rows
+            .iter()
+            .find(|s| s.index == row)
+            .map_or(0.0, |s| s.start + s.size);
+        let x = layout
+            .cols
+            .iter()
+            .find(|s| s.index == col)
+            .map_or(0.0, |s| s.start);
+        self.open_context_menu(Point::new(rect.x + x, rect.y + y), backend);
+    }
+
+    /// Every event while the context menu is open: keys and pointer
+    /// gestures go to the menu, a press outside it dismisses it.
+    fn handle_context_menu_event(
+        &mut self,
+        event: &UiEvent,
+        backend: &mut dyn Backend,
+    ) -> Reaction {
+        let Some((menu, rect)) = self.context_menu.clone() else {
+            return Reaction::Continue;
+        };
+        let local = |p: Point| Point::new(p.x - rect.x, p.y - rect.y);
+        let routed = match event {
+            UiEvent::WindowResized { .. } => {
+                self.context_menu = None;
+                self.refresh(backend);
+                return Reaction::Redraw;
+            }
+            UiEvent::MouseDown { position, .. } if !rect.contains(*position) => {
+                self.context_menu = None;
+                return Reaction::Redraw;
+            }
+            UiEvent::MouseDown {
+                button: MouseButton::Left,
+                position,
+                modifiers,
+                ..
+            } => RoutedEvent::Pointer {
+                kind: PointerKind::Down(MouseButton::Left),
+                sub: None,
+                local: local(*position),
+                mods: *modifiers,
+            },
+            UiEvent::MouseMoved { position, .. } if rect.contains(*position) => {
+                RoutedEvent::Pointer {
+                    kind: PointerKind::Move,
+                    sub: None,
+                    local: local(*position),
+                    mods: Modifiers::default(),
+                }
+            }
+            UiEvent::KeyPressed {
+                key,
+                modifiers,
+                repeat,
+            } => RoutedEvent::Key(KeyEvent {
+                key: key.clone(),
+                modifiers: *modifiers,
+                repeat: *repeat,
+            }),
+            _ => return Reaction::Continue,
+        };
+        let layout = backend.layout_primitive(rect, &menu);
+        let mut host = WidgetHost::new(Self::units(backend));
+        let handled = {
+            let mut cx = EventCx::new(menu.id, &mut host);
+            menu.handle(&mut self.context_menu_state, &routed, &layout, &mut cx)
+        };
+        match handled {
+            Handled::Event(ContextMenuEvent::Activated { item }) => {
+                self.context_menu = None;
+                self.run_command_id(item.as_str(), backend)
+            }
+            Handled::Event(ContextMenuEvent::SelectionChanged { idx }) => {
+                if let Some((menu, _)) = &mut self.context_menu {
+                    menu.selected_idx = idx;
+                }
+                Reaction::Redraw
+            }
+            Handled::Event(ContextMenuEvent::Dismissed | ContextMenuEvent::SubmenuClosed) => {
+                self.context_menu = None;
+                Reaction::Redraw
+            }
+            Handled::Event(_) | Handled::Consumed => Reaction::Redraw,
+            Handled::Ignored => Reaction::Continue,
+        }
+    }
+
+    /// Run one command a menu item, a context-menu item or the palette
+    /// names: the few ids this app handles itself (quit, find/replace,
+    /// banded rows), a parameter picker for the ids that need one, and
+    /// every other catalog id through the engine.
+    fn run_command_id(&mut self, id_str: &str, backend: &mut dyn Backend) -> Reaction {
+        if id_str == menu::QUIT {
+            return Reaction::Exit;
+        }
+        if id_str == menu::BANDED_ROWS {
+            self.striped = !self.striped;
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
+        if id_str == "edit.find" || id_str == "edit.replace" {
+            self.open_find(id_str == "edit.replace", backend);
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
+        // Same "open a picker instead of running it" branch the
+        // palette's own `PaletteOutcome::Pick` uses — a menu
+        // click on Font/Font Size/Fill Color/Font Color/Borders/
+        // Draw Border/Number Format needs the same parameter
+        // dialog, just reached from the menu instead of the
+        // palette. `catalog_id` recovers the `&'static str` the
+        // catalog's own id table holds, since `WidgetId` only
+        // ever gives back a borrowed `&str` and `FormatPicker::
+        // open` wants the former.
+        if format_picker::has_picker(id_str) {
+            match Self::catalog_id(id_str) {
+                Some(cid) => self.format_picker = FormatPicker::open(cid),
+                // Unreachable today — `menu::tab_items` only ever
+                // builds items from `CATALOG` itself, so every id
+                // it hands back resolves here by construction.
+                // Surfaced rather than silently dropped in case a
+                // future catalog id rename ever desyncs the two.
+                None => {
+                    self.error = Some(format!("no catalog entry for \"{id_str}\""));
+                }
+            }
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
+        // Same "open a picker instead of running it" branch
+        // the palette's own `PaletteOutcome::PickFunction`
+        // uses — the seven Function Library category ids
+        // are `cmd!(query ...)` wrappers whose result would
+        // be discarded by the generic arm below, and
+        // `formulas.insertFunction` only pushes a
+        // `UiRequest::Dialog` nothing in this crate reads.
+        // `function_picker::has_picker` and
+        // `open_function_picker` already exist for exactly
+        // this; see their own docs.
+        if function_picker::has_picker(id_str) {
+            match Self::catalog_id(id_str) {
+                Some(cid) => match self.open_function_picker(cid) {
+                    Ok(picker) => self.function_picker = Some(picker),
+                    Err(e) => self.error = Some(e.to_string()),
+                },
+                // Unreachable today, for the same reason as
+                // the `format_picker::has_picker` arm above.
+                None => {
+                    self.error = Some(format!("no catalog entry for \"{id_str}\""));
+                }
+            }
+            self.refresh(backend);
+            return Reaction::Redraw;
+        }
+        // `sync_selection` before running a catalog command
+        // against no explicit range, same as the palette run
+        // above — except for the ids this crate wraps in its
+        // own helper instead of a bare `execute`: "Paste" needs
+        // the system clipboard (see `menu::tab_items`'s and
+        // `clipboard::paste_from_system`'s own docs), "Copy"/
+        // "Cut" need `clipboard::copy`/`cut`'s mirror onto the
+        // system clipboard (the same one `CalcApp::handle`'s
+        // own Ctrl+C/X dispatch uses — a bare `execute` here
+        // would silently stop populating the OS clipboard), and
+        // "Save" needs `CalcApp::save`'s "nothing to save to
+        // yet" handling (the same one Ctrl+S's dispatch uses).
+        // Keeping all three in step with the keyboard path
+        // matters most on macOS: a native `NSMenu` key
+        // equivalent (see `menu::accelerator`'s own doc) bypasses
+        // `handle`'s `KeyPressed` arms entirely and lands here
+        // instead, so this arm is that shortcut's only path to
+        // the engine on that platform.
+        let result = if id_str == "edit.paste" {
+            clipboard::paste_from_system(self, backend)
+        } else if id_str == "edit.copy" {
+            clipboard::copy(self, backend)
+        } else if id_str == "edit.cut" {
+            clipboard::cut(self, backend)
+        } else if id_str == "file.save" {
+            self.save()
+        } else {
+            self.sync_selection()
+                .and_then(|()| self.execute(id_str, json!({})))
+                .map(|_| ())
+        };
+        if let Err(e) = result {
+            self.error = Some(e.to_string());
+        }
+        self.refresh(backend);
+        Reaction::Redraw
     }
 
     /// Apply `op` to the in-progress cell edit's text buffer — used for

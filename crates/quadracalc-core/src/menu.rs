@@ -54,11 +54,21 @@ const TABS: &[(&str, &str)] = &[
 /// `Session::execute`.
 pub const QUIT: &str = "quadracalc.quit";
 
+/// Sentinel id for View › Banded Rows, the grid's zebra striping — an
+/// app setting with no catalog counterpart, toggled by
+/// `CalcApp::run_command_id`.
+pub const BANDED_ROWS: &str = "quadracalc.bandedRows";
+
 /// Build this frame's menu bar from `session`'s current classification
 /// (`palette::entries`) — the same enabled/disabled-with-reason logic
 /// the command palette already uses, so e.g. "Undo" greys out the
 /// moment there's nothing left to undo.
 pub fn menus(session: &Session) -> Vec<MenuDef> {
+    menus_for(session, true)
+}
+
+/// [`menus`], with View › Banded Rows checked when `banded_rows`.
+pub fn menus_for(session: &Session, banded_rows: bool) -> Vec<MenuDef> {
     let entries = palette::entries(session);
     let mut menus: Vec<MenuDef> = TABS
         .iter()
@@ -83,6 +93,14 @@ pub fn menus(session: &Session) -> Vec<MenuDef> {
             file.items.push(separator());
         }
         file.items.push(action(QUIT, "Quit"));
+    }
+    if let Some(view) = menus.iter_mut().find(|m| m.id.as_str() == "menu:view") {
+        if !view.items.is_empty() {
+            view.items.push(separator());
+        }
+        let mut banded = action(BANDED_ROWS, "Banded Rows");
+        banded.checked = Some(banded_rows);
+        view.items.push(banded);
     }
     menus
 }
@@ -220,6 +238,8 @@ fn shortcut_for(id: &str) -> Option<KeyBinding> {
         "edit.paste" => Some(KeyBinding::Paste),
         "edit.fillDown" => Some(KeyBinding::Literal("Ctrl+D".to_string())),
         "edit.fillRight" => Some(KeyBinding::Literal("Ctrl+R".to_string())),
+        "edit.find" => Some(KeyBinding::Find),
+        "edit.replace" => Some(KeyBinding::Literal("Ctrl+H".to_string())),
         _ => None,
     }
 }

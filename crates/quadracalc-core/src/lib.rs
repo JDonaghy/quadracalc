@@ -10,15 +10,18 @@
 mod address;
 pub mod agent;
 mod app;
+mod cell_style;
 mod chart_view;
 mod clipboard;
+mod find;
 pub mod format_picker;
 mod formula_bar;
 pub mod function_picker;
 mod menu;
 pub mod palette;
+mod sheet_view;
 mod sheets;
 mod sidebar;
 
 pub use address::{Address, column_label};
-pub use app::{CalcApp, View};
+pub use app::{CalcApp, Mode, View};

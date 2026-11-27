@@ -85,3 +85,33 @@ fn tui_palette_chord_closes_an_open_menu() {
     let mut driver = TuiDriver::new(CalcApp::new(), 80, 24);
     scenarios::palette_chord_closes_an_open_menu(&mut driver);
 }
+
+#[test]
+fn tui_find_steps_through_matches() {
+    let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
+    scenarios::find_steps_through_matches(&mut driver);
+}
+
+#[test]
+fn tui_replace_all_through_the_find_panel() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 100, 30);
+    scenarios::replace_all_through_the_find_panel(&mut driver);
+}
+
+#[test]
+fn tui_context_menu_clears_a_cell() {
+    let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
+    scenarios::context_menu_clears_a_cell(&mut driver);
+}
+
+#[test]
+fn tui_wheel_scrolls_under_a_frozen_header() {
+    let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
+    scenarios::wheel_scrolls_under_a_frozen_header(&mut driver);
+}
+
+#[test]
+fn tui_double_click_edits_in_place() {
+    let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
+    scenarios::double_click_edits_in_place(&mut driver);
+}

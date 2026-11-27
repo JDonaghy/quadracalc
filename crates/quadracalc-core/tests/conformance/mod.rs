@@ -452,3 +452,194 @@ pub fn palette_chord_closes_an_open_menu<D: ConformanceDriver + DriverInput>(d: 
         "closing the palette should not bring the dropdown back"
     );
 }
+
+/// The centre of `needle`'s first painted occurrence, in the driver's
+/// own units — `ConformanceDriver` has `click_text` but no right-click or
+/// double-click counterpart, so those gestures are dispatched here at
+/// the point `click_text` would have clicked. Located within its text
+/// run proportionally, since a run can be wider than the needle.
+fn locate<D: ConformanceDriver>(d: &D, needle: &str) -> quadraui::Point {
+    let inventory = d.inventory();
+    let run = inventory
+        .text_runs()
+        .iter()
+        .find(|r| r.text.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} is not painted"));
+    let chars = run.text.chars().count().max(1) as f32;
+    let before = run.text[..run.text.find(needle).unwrap()].chars().count() as f32;
+    let mid = before + needle.chars().count() as f32 / 2.0;
+    quadraui::Point::new(
+        run.bounds.x + run.bounds.width * mid / chars,
+        run.bounds.y + run.bounds.height / 2.0,
+    )
+}
+
+fn key_with(key: Key, modifiers: Modifiers) -> UiEvent {
+    UiEvent::KeyPressed {
+        key,
+        modifiers,
+        repeat: false,
+    }
+}
+
+/// Ctrl+F opens the find panel; typing a query jumps to the first match
+/// at or after the cursor and counts them, Enter steps to the next, and
+/// Escape closes the panel without quitting. Needs
+/// `CalcApp::with_sample()` as its fixture: the monthly table's
+/// "Over target?" column says "yes" in F16:F22.
+pub fn find_steps_through_matches<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    ConformanceDriver::ctrl_char(d, 'f');
+    d.type_text("yes");
+    assert!(
+        d.screen_has("1 of 7"),
+        "typing a query should count the matches and land on the first"
+    );
+    assert!(
+        d.screen_has("F16"),
+        "the cursor should jump to the first match, F16"
+    );
+
+    ConformanceDriver::press_named(d, NamedKey::Enter);
+    assert!(
+        d.screen_has("2 of 7"),
+        "Enter should step to the next match"
+    );
+    assert!(d.screen_has("F17"), "the next match is F17");
+
+    d.dispatch(key_with(
+        Key::Named(NamedKey::Enter),
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    ));
+    assert!(
+        d.screen_has("1 of 7"),
+        "Shift+Enter should step back to the previous match"
+    );
+
+    ConformanceDriver::press_named(d, NamedKey::Escape);
+    assert!(!d.screen_has("of 7"), "Escape should close the find panel");
+    assert!(
+        !d.exited(),
+        "Escape in the find panel must not quit the app"
+    );
+}
+
+/// Ctrl+H opens find-and-replace; Ctrl+Enter in the replace field
+/// replaces every match through the engine's own `edit.replace`. Needs a
+/// blank `CalcApp::new()` as its fixture.
+pub fn replace_all_through_the_find_panel<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    // Short enough to fit an 8-wide default column unclipped.
+    for text in ["ab", "ab cd", "ef"] {
+        d.type_text(text);
+        ConformanceDriver::press_named(d, NamedKey::Enter);
+    }
+    ConformanceDriver::ctrl_char(d, 'h');
+    d.type_text("ab");
+    assert!(d.screen_has("of 2"), "two cells contain \"ab\"");
+    ConformanceDriver::press_named(d, NamedKey::Tab); // to the replace field
+    d.type_text("xy");
+    d.dispatch(key_with(
+        Key::Named(NamedKey::Enter),
+        Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    ));
+    assert!(
+        d.screen_has("Replaced 2"),
+        "replace-all should report how many cells it changed"
+    );
+    assert!(d.screen_has("xy cd"), "A2 should read \"xy cd\"");
+    assert!(d.screen_has("ef"), "a non-matching cell is left alone");
+    assert!(!d.screen_has("ab cd"), "A2's old text should be gone");
+}
+
+/// Right-clicking a cell opens the grid's context menu at the pointer;
+/// clicking "Clear Contents" clears the clicked cell through
+/// `edit.clearContents` and closes the menu. Shift+F10 opens the same
+/// menu from the keyboard, and Escape closes it. Needs
+/// `CalcApp::with_sample()` as its fixture.
+pub fn context_menu_clears_a_cell<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    let position = locate(d, "Hosting");
+    d.dispatch(UiEvent::MouseDown {
+        widget: None,
+        button: quadraui::MouseButton::Right,
+        position,
+        modifiers: Modifiers::default(),
+    });
+    assert!(
+        d.screen_has("Insert Row") && d.screen_has("Clear Contents"),
+        "right-click should open the grid's context menu"
+    );
+
+    d.click_text("Clear Contents");
+    assert!(
+        !d.screen_has("Insert Row"),
+        "activating an item should close the menu"
+    );
+    assert!(
+        !d.screen_has("Hosting"),
+        "Clear Contents should empty the right-clicked cell, A2"
+    );
+
+    d.dispatch(key_with(
+        Key::Named(NamedKey::F(10)),
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    ));
+    assert!(
+        d.screen_has("Clear Contents"),
+        "Shift+F10 should open the context menu at the cursor"
+    );
+    ConformanceDriver::press_named(d, NamedKey::Escape);
+    assert!(
+        !d.screen_has("Clear Contents"),
+        "Escape should close the context menu"
+    );
+    assert!(!d.exited(), "Escape in the context menu must not quit");
+}
+
+/// The mouse wheel scrolls the grid while the frozen header row stays
+/// put, and scrolling back up brings the top rows back. Needs
+/// `CalcApp::with_sample()` as its fixture: row 1 is frozen.
+pub fn wheel_scrolls_under_a_frozen_header<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    d.scroll_at("Hosting", -10);
+    assert!(
+        !d.screen_has("Hosting") && !d.screen_has("Domains"),
+        "scrolling down should move rows 2-3 off screen"
+    );
+    assert!(
+        d.screen_has("Discounted Total"),
+        "the frozen header row should stay on screen"
+    );
+    assert!(
+        d.screen_has("A1"),
+        "the wheel scrolls the view, not the cursor"
+    );
+
+    d.scroll_at("Discounted Total", 20);
+    assert!(
+        d.screen_has("Hosting"),
+        "scrolling back up should bring row 2 back"
+    );
+}
+
+/// Double-clicking a cell opens it for editing with the caret after its
+/// text, like F2. Needs `CalcApp::with_sample()` as its fixture.
+pub fn double_click_edits_in_place<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    let position = locate(d, "Domains");
+    d.dispatch(UiEvent::DoubleClick {
+        widget: None,
+        position,
+    });
+    d.type_text("!");
+    ConformanceDriver::press_named(d, NamedKey::Enter);
+    assert!(
+        d.screen_has("Domains!"),
+        "double-click should edit A3 in place, keeping its text"
+    );
+}

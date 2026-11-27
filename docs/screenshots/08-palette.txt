@@ -1,0 +1,30 @@
+ File  Home  Insert  Formulas  Data  View                                                           
+ A1        fx [Item                                                                                ]
+          A    │    B     │   C   │     D     │    E    │       F        │G │     H      │    I    │
+    1 Item     │Cost      │       │Tier       │Discount │Discounted Total│  │            │         │
+    2 Hosting  │ $1,200.50│       │Premium    │   15.00%│       $1,028.08│  │            │         │
+    3 Domains  │     $9.00│       │           │         │                │  │            │         │
+    4 Total    │ $1,209.50│       │           │         │                │  │            │         │
+    5          ╭─ Commands  5/306 ───────────────────────────────────────────────[L]╮    │         │
+    6 Tier     │> freeze                                                            │    │         │
+    7 Standard ├────────────────────────────────────────────────────────────────────┤    │         │
+    8 Premium  │▶ Freeze Panes                                      needs unfreezes │    │         │
+    9          │  Freeze Top Row                                      View › Window │    │         │
+   10 Month    │  Freeze First Column                                 View › Window │nce │         │
+   11 Jan      │  Unfreeze Panes                                      View › Window │th  │Dec      │
+   12 Feb      │  Refresh                                 PivotTable Analyze › Data │enue│$8,424.00│
+   13 Mar      │                                                                    │s   │    202.4│
+   14 Apr      │                                                                    │    │$5,000.00│
+   15 May      │                                                                    │    │         │
+   16 Jun      │                                                                    │    │         │
+   17 Jul      │                                                                    │    │         │
+   18 Aug      │                                                                    │    │         │
+   19 Sep      │                                                                    │    │         │
+   20 Oct      │                                                                    │    │         │
+   21 Nov      ╰────────────────────────────────────────────────────────────────────╯    │         │
+   22 Dec      │       312│ $27.00│  $8,424.00│   18.61%│yes             │  │            │         │
+   23 Total    │      2429│ $25.54│ $62,027.00│  192.50%│7 of 12         │  │            │         │
+   24          │          │       │           │         │                │  │            │         │
+   25          │          │       │           │         │                │  │            │         │
+ Sheet1 │                                                                                           
+ READY  A1  Item                 F2 edit · Ctrl+F find · : commands · Alt+H menu · q quit  Count: 1 

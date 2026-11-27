@@ -100,3 +100,39 @@ fn mac_palette_chord_closes_an_open_menu() {
     let mut driver = MacDriver::new(CalcApp::new(), W, H);
     scenarios::palette_chord_closes_an_open_menu(&mut driver);
 }
+
+/// The showcase scenarios run on a larger window: the sample sheet's
+/// columns are sized for content, and the find panel and context menu
+/// need room beside them.
+const WIDE_W: u32 = 1400;
+const WIDE_H: u32 = 800;
+
+#[test]
+fn mac_find_steps_through_matches() {
+    let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::find_steps_through_matches(&mut driver);
+}
+
+#[test]
+fn mac_replace_all_through_the_find_panel() {
+    let mut driver = MacDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::replace_all_through_the_find_panel(&mut driver);
+}
+
+#[test]
+fn mac_context_menu_clears_a_cell() {
+    let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::context_menu_clears_a_cell(&mut driver);
+}
+
+#[test]
+fn mac_wheel_scrolls_under_a_frozen_header() {
+    let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::wheel_scrolls_under_a_frozen_header(&mut driver);
+}
+
+#[test]
+fn mac_double_click_edits_in_place() {
+    let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::double_click_edits_in_place(&mut driver);
+}
