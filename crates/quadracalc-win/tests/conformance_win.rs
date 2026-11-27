@@ -61,3 +61,15 @@ fn win_switch_sheets() {
     let mut driver = WinDriver::new(CalcApp::with_sample().unwrap(), W, H);
     scenarios::switch_sheets(&mut driver);
 }
+
+#[test]
+fn win_click_a_format_picker_choice() {
+    let mut driver = WinDriver::new(CalcApp::new(), W, H);
+    scenarios::click_a_format_picker_choice(&mut driver);
+}
+
+#[test]
+fn win_palette_chord_closes_an_open_menu() {
+    let mut driver = WinDriver::new(CalcApp::new(), W, H);
+    scenarios::palette_chord_closes_an_open_menu(&mut driver);
+}

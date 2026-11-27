@@ -56,13 +56,11 @@ pub fn active_sheet_name(session: &Session) -> Option<String> {
 /// responds to would be misleading.
 ///
 /// `scroll_offset` is the caller's own stored value (`CalcApp::tab_scroll`)
-/// — per `TabBar`'s backend contract (`quadraui::TabBar::layout`'s doc),
-/// the caller owns scroll and must feed back whatever
-/// `Backend::tab_bar_layout`'s `correct_scroll_offset` resolves it to
-/// (see `CalcApp::refresh`'s own comment for why that method rather than
-/// `Backend::resolve_tab_bar_layout`), or an overflowing bar permanently
-/// drops the active tab off the strip the moment the stored offset goes
-/// stale.
+/// — per `TabBar`'s contract (`quadraui::TabBarPrimitiveLayout::
+/// corrected_scroll_offset`'s doc), the caller owns scroll and must feed
+/// back whatever the backend's `layout_primitive` resolves it to (see
+/// `CalcApp::refresh`), or an overflowing bar permanently drops the
+/// active tab off the strip the moment the stored offset goes stale.
 pub fn tab_bar(session: &Session, scroll_offset: usize) -> TabBar {
     let names = sheet_names(session);
     let active = active_sheet_index(session);
@@ -83,6 +81,7 @@ pub fn tab_bar(session: &Session, scroll_offset: usize) -> TabBar {
         active_accent: None,
         show_tab_close: false,
         compact: false,
+        ..TabBar::default()
     }
 }
 

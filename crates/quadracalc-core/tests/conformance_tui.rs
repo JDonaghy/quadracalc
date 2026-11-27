@@ -73,3 +73,15 @@ fn tui_menu_save_with_no_file_shows_the_save_error() {
     let mut driver = TuiDriver::new(CalcApp::new(), 80, 20);
     scenarios::menu_save_with_no_file_shows_the_save_error(&mut driver);
 }
+
+#[test]
+fn tui_click_a_format_picker_choice() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 24);
+    scenarios::click_a_format_picker_choice(&mut driver);
+}
+
+#[test]
+fn tui_palette_chord_closes_an_open_menu() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 80, 24);
+    scenarios::palette_chord_closes_an_open_menu(&mut driver);
+}

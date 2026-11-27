@@ -74,3 +74,15 @@ fn gtk_menu_save_with_no_file_shows_the_save_error() {
     let mut driver = GtkDriver::new(CalcApp::new(), W, H);
     scenarios::menu_save_with_no_file_shows_the_save_error(&mut driver);
 }
+
+#[test]
+fn gtk_click_a_format_picker_choice() {
+    let mut driver = GtkDriver::new(CalcApp::new(), W, H);
+    scenarios::click_a_format_picker_choice(&mut driver);
+}
+
+#[test]
+fn gtk_palette_chord_closes_an_open_menu() {
+    let mut driver = GtkDriver::new(CalcApp::new(), W, H);
+    scenarios::palette_chord_closes_an_open_menu(&mut driver);
+}

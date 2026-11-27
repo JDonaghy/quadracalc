@@ -130,7 +130,7 @@ fn classify(session: &Session, id: &str) -> (bool, Option<String>) {
 /// every other id. Unlike `insert.table`/`insert.pivotTable`/
 /// `insert.checkbox` (plain cell content and formatting `CellGrid`
 /// already paints) or `insert.chart`/`insert.pivotChart` (wired to a
-/// `Surface::Chart` panel — `crate::chart_view`), each of these creates
+/// `Chart` widget panel — `crate::chart_view`), each of these creates
 /// a *floating* object anchored at a point rather than inside a cell
 /// (a `Shape`/`Slicer`) or print-only state no view here ever renders
 /// (`pageLayout.headerFooter`), and quadraui has no floating-object

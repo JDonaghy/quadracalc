@@ -4,8 +4,8 @@
 //! has no input surface for a required `name`/`size`/`color`/`preset`/
 //! `edge`/`format` parameter.
 //!
-//! Hosts [`quadraui::MessageDialogController`] — the cross-backend
-//! "show a `Dialog`, resolve on Enter/click, Escape cancels" composition
+//! Hosts [`quadraui::MessageDialog`] — the cross-backend
+//! "show a `Dialog`, resolve on Enter/click, Escape cancels" widget
 //! quadraui already ships — over a short built-in list of choices per
 //! command id, and maps whichever choice is picked back onto the params
 //! `CalcApp::handle` runs the command with. One composition covers every
@@ -16,10 +16,9 @@
 //! format picks from a handful of named codes — all the same
 //! "list of labelled buttons, Enter/click resolves" shape.
 //!
-//! [`FormatPicker::render`] pushes the controller's `Dialog` through
-//! `ScreenLayout` as a `Surface::Dialog`, same as `palette.rs` does for
-//! the command palette — not a direct `MessageDialogController::render`
-//! call — so it shows up in the accessibility tree and the MCP
+//! [`FormatPicker::render`] pushes the `MessageDialog` through
+//! `ScreenLayout` as a `Surface::Widget`, same as `app.rs` does for the
+//! command palette — not a direct `draw_dyn` call — so it shows up in the accessibility tree and the MCP
 //! `snapshot`/`act` surface while it's open, same as everything else
 //! `app.rs` paints.
 //!
@@ -30,9 +29,8 @@
 //! directly.
 
 use quadraui::{
-    Backend, Dialog, DialogHit, DialogLayout, Handled, Key, MessageDialogButton,
-    MessageDialogController, MessageDialogOptions, NamedKey, Rect, ScreenLayout, Surface,
-    ToolbarItemMeasure, UiEvent, WidgetId,
+    Backend, Dialog, DialogHit, DialogLayout, Handled, Key, MessageDialog, MessageDialogButton,
+    MessageDialogOptions, MessageDialogState, NamedKey, ScreenLayout, Surface, UiEvent, WidgetId,
 };
 use serde_json::{Value, json};
 
@@ -222,9 +220,12 @@ pub enum PickerOutcome {
 /// it's open.
 pub struct FormatPicker {
     command_id: &'static str,
-    controller: MessageDialogController,
+    dialog: MessageDialog,
+    /// Keyboard focus among `dialog`'s buttons — the one piece of
+    /// interaction state the widget doesn't carry on its descriptor.
+    dialog_state: MessageDialogState,
     /// `choices[i].1` is the params for `ids[i]` (same index as the
-    /// `MessageDialogButton`s `controller` was built from, before the
+    /// `MessageDialogButton`s `dialog` was built from, before the
     /// trailing Cancel button); `cancel_id` is that Cancel button's id.
     ids: Vec<WidgetId>,
     params: Vec<Value>,
@@ -261,7 +262,7 @@ impl FormatPicker {
             is_cancel: true,
             spec: None,
         });
-        let controller = MessageDialogController::new(MessageDialogOptions {
+        let dialog = MessageDialog::new(MessageDialogOptions {
             title: title.to_string(),
             body: String::new(),
             buttons,
@@ -271,7 +272,8 @@ impl FormatPicker {
         .with_id(format!("quadracalc-format-picker:{id}"));
         Some(Self {
             command_id: id,
-            controller,
+            dialog,
+            dialog_state: MessageDialogState::default(),
             ids,
             params: choices.into_iter().map(|c| c.params).collect(),
             cancel_id,
@@ -282,64 +284,42 @@ impl FormatPicker {
     /// useful to tests; `app.rs` paints through [`Self::render`]
     /// instead.
     pub fn dialog(&self) -> &Dialog {
-        self.controller.dialog()
+        &self.dialog.dialog
     }
 
-    /// Compute this frame's [`DialogLayout`], centred in `backend`'s
-    /// viewport. [`Self::render`] pushes this through `ScreenLayout` and
-    /// [`Self::handle_event`] hit-tests a click against it — "one layout
-    /// fn, two callers", so paint and hit-test can never disagree.
-    ///
-    /// `MessageDialogController::layout` (what [`MessageDialogController::render`]
-    /// and its own click handling use internally) is private, so this
-    /// recomputes a layout from the public [`Dialog::measure_generic_with_style`]
-    /// and [`Dialog::layout`] primitives instead of calling into it: a
-    /// close approximation of the same sizing (matches it exactly on a
-    /// TUI backend's char-cell geometry; pixel backends' button widths
-    /// may differ by a few pixels since this has no real per-button
-    /// label measurement on hand), but self-consistent between this
-    /// picker's own paint and click paths, which is what matters for
-    /// correctness here.
+    /// This frame's [`DialogLayout`], centred in `backend`'s viewport —
+    /// `MessageDialog::dialog_layout`, the same `layout_primitive` call
+    /// the `Surface::Widget` [`Self::render`] pushes resolves when it
+    /// paints, so a click [`Self::handle_event`] hit-tests against it
+    /// always lands on what was painted.
     fn layout(&self, backend: &dyn Backend) -> DialogLayout {
-        let m = backend.measure();
-        let viewport = backend.viewport();
-        let viewport_rect = Rect::new(0.0, 0.0, viewport.width, viewport.height);
-        let style = backend.style();
-        let dialog = self.controller.dialog();
-        let measure = dialog.measure_generic_with_style(
-            m.char_width,
-            m.line_height,
-            viewport_rect,
-            0.0,
-            &style,
-        );
-        dialog.layout(viewport_rect, measure, |_| ToolbarItemMeasure::new(0.0))
+        self.dialog.dialog_layout(backend)
     }
 
-    /// Push this frame's dialog through `layout` — the same
+    /// Push this frame's dialog over the whole viewport — the same
     /// `ScreenLayout`/`Surface` path every other overlay in this app
     /// (the palette, the grid) paints through, so the picker shows up
     /// in the accessibility tree and the MCP `snapshot`/`act` surface
     /// while it's open, not just on screen.
     pub fn render(&self, layout: &mut ScreenLayout, backend: &dyn Backend) {
-        layout.push(Surface::Dialog {
-            dialog: self.controller.dialog().clone(),
-            layout: self.layout(backend),
+        layout.push(Surface::Widget {
+            rect: backend.viewport().rect(),
+            widget: Box::new(self.dialog.clone()),
         });
     }
 
     /// Feed one event to the picker. Up/Down are remapped to Left/Right
-    /// first — [`MessageDialogController`]'s own keyboard model cycles
+    /// first — [`MessageDialog`]'s own keyboard model cycles
     /// button focus on Left/Right/Tab (it's written for a horizontal
     /// button row), but every choice list here renders
     /// `vertical_buttons`, where Up/Down reads as the natural "next
     /// choice" key.
     ///
     /// A `MouseDown` is hit-tested against [`Self::layout`] directly
-    /// instead of going through [`MessageDialogController::handle_event`]
-    /// (whose own click handling hit-tests its private, possibly
-    /// slightly different, internal layout) — so a click always resolves
-    /// against exactly what [`Self::render`] just painted.
+    /// instead of going through [`MessageDialog::handle_event`], whose
+    /// own click handling treats a press outside the dialog as consumed
+    /// rather than as a cancel — this picker closes on an outside click,
+    /// the same as the palette does.
     pub fn handle_event(&mut self, event: &UiEvent, backend: &dyn Backend) -> PickerOutcome {
         let remapped = remap_vertical_nav(event);
         let event = remapped.as_ref().unwrap_or(event);
@@ -350,7 +330,10 @@ impl FormatPicker {
                 DialogHit::Body | DialogHit::BodyToolbarButton(_) => PickerOutcome::Changed,
             };
         }
-        match self.controller.handle_event(event, backend) {
+        match self
+            .dialog
+            .handle_event(&mut self.dialog_state, event, backend)
+        {
             Handled::Event(chosen) => self.resolve(chosen),
             Handled::Consumed => PickerOutcome::Changed,
             Handled::Ignored => PickerOutcome::Ignored,

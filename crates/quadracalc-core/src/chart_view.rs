@@ -1,7 +1,7 @@
 //! Insert › Charts/PivotChart: turns the active sheet's own GridCraft
 //! `Chart`s into quadraui [`Chart`] primitives so [`crate::app::View::screen`]
-//! can push them as `Surface::Chart`, the same way it already pushes the
-//! cell grid as `Surface::Widget`/`TabBar` (see `app.rs`'s module doc).
+//! can push them as `Surface::Widget`s, the same way it already pushes
+//! the cell grid and the sheet-tabs `TabBar` (see `app.rs`'s module doc).
 //! Before this module existed, `insert.chart`/`insert.pivotChart` ran
 //! fine against the engine — the command surface never needed a
 //! parameter this app couldn't supply — but nothing ever painted the
@@ -75,6 +75,9 @@ fn build(session: &mut Session, chart: &model::Chart) -> Chart {
         y_ticks: None,
         x_ticks: None,
         show_grid: chart.gridlines,
+        // No pointer-hover readout: the chart panel is display-only.
+        hovered_point: None,
+        crosshair_x: None,
     }
 }
 

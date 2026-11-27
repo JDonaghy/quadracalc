@@ -146,8 +146,8 @@ fn number_format_can_pick_past_the_default_choice() {
     assert!(code.as_str().unwrap_or_default().contains('$'), "{code:?}");
 }
 
-/// The open picker is pushed through `ScreenLayout` as a `Surface::Dialog`
-/// — not painted with a direct `backend.draw_dialog` call that bypasses
+/// The open picker is pushed through `ScreenLayout` as a `Surface::Widget`
+/// — not painted with a direct `backend.draw_dyn` call that bypasses
 /// frame capture — so it shows up in `Backend::last_frame`'s captured
 /// node tree, the same place the accessibility tree and the MCP
 /// `snapshot`/`act` tools read a screen from (`Backend::last_frame`'s own

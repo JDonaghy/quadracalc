@@ -28,15 +28,15 @@ use gridcraft_engine::catalog::CATALOG;
 use gridcraft_engine::{Session, UiRequest};
 use quadraui::control::{CommandError, CommandRegistry, CommandSpec};
 use quadraui::interactive::SubTarget;
-use quadraui::primitive::{LayoutCtx, Primitive, Units};
+use quadraui::primitive::{LayoutCtx, Units};
 use quadraui::primitives::cell_grid::CellEditState;
 use quadraui::{
-    AppLogic, Backend, ButtonMask, Cell, CellGrid, CellGridEvent, CellGridPrimitiveLayout,
-    CellGridState, CellStyle, Chart, Color, EditOp, EventCx, EventHost, Handled, Interactive, Key,
-    KeyEvent, ListViewHit, MenuEvent, MenuSystem, Modifiers, MouseButton, NamedKey, Point,
-    PointerKind, PointerShape, Reaction, Rect, RoutedEvent, ScreenLayout, SidebarPanelHit,
-    StatusBar, StatusBarSegment, Surface, TabBar, TabBarHit, TextField, UiEvent, WidgetId,
-    resolve_bar_height,
+    AppLogic, AppMenu, AppMenuEvent, AppMenuState, Backend, ButtonMask, Cell, CellGrid,
+    CellGridEvent, CellGridPrimitiveLayout, CellGridState, CellStyle, Chart, Color,
+    DrawsPrimitives, EditOp, EventCx, EventHost, Handled, Interactive, Key, KeyEvent, ListViewHit,
+    Modifiers, MouseButton, NamedKey, Point, PointerKind, PointerShape, Reaction, Rect,
+    RoutedEvent, ScreenLayout, SidebarPanelHit, StatusBar, StatusBarSegment, Surface, TabBar,
+    TabBarHit, TextField, UiEvent, WidgetId, resolve_bar_height,
 };
 use serde_json::{Value, json};
 
@@ -126,12 +126,16 @@ pub struct CalcApp {
     /// The right-hand Name Manager sidebar's open/selected state — see
     /// `crate::sidebar`'s module doc. Closed by default.
     sidebar: Sidebar,
-    /// The classic menu bar — `quadraui`'s `MenuSystem` compose helper
-    /// owns the open/close, keyboard-navigation and modal-stack state;
-    /// `crate::menu::menus` rebuilds its `MenuDef`s from the engine's
-    /// own command catalog every `refresh`, so e.g. "Undo" greys out
-    /// the moment there's nothing left to undo.
-    menu_system: MenuSystem,
+    /// The classic menu bar — `quadraui`'s `AppMenu` widget, driven
+    /// with raw events through `AppMenu::handle_ui_event`, which keeps
+    /// the open/highlight view on the descriptor and the open dropdown
+    /// on the modal stack; `crate::menu::menus` rebuilds its `MenuDef`s
+    /// from the engine's own command catalog every `refresh`, so e.g.
+    /// "Undo" greys out the moment there's nothing left to undo.
+    app_menu: AppMenu,
+    /// [`AppMenu`]'s own [`Interactive::State`] — the open dropdown's
+    /// type-ahead buffer.
+    app_menu_state: AppMenuState,
 }
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
@@ -189,7 +193,7 @@ impl CalcApp {
         grid.row_count = ROW_COUNT;
         grid.col_count = COL_COUNT;
         grid.has_focus = true;
-        let menu_system = MenuSystem::new(menu::menus(&session));
+        let app_menu = AppMenu::new(WidgetId::new("quadracalc-menu"), menu::menus(&session));
         Self {
             session,
             grid,
@@ -206,7 +210,8 @@ impl CalcApp {
             sheet_cursors: sheets::SheetCursors::default(),
             tab_scroll: 0,
             sidebar: Sidebar::default(),
-            menu_system,
+            app_menu,
+            app_menu_state: AppMenuState::default(),
         }
     }
 
@@ -601,7 +606,7 @@ impl CalcApp {
     fn type_key_into_grid(&mut self, key: Key, backend: &mut dyn Backend) -> Reaction {
         let rect = self.grid_rect(backend);
         let layout = Self::grid_layout(&self.grid, backend, rect);
-        let units = Self::layout_ctx(backend).units();
+        let units = Self::units(backend);
         let routed = RoutedEvent::Key(KeyEvent {
             key,
             modifiers: Modifiers::default(),
@@ -616,7 +621,7 @@ impl CalcApp {
 
     /// The menu bar's own rect — the viewport's top row, sized by
     /// `resolve_bar_height` (the same metric `quadraui`'s own
-    /// `MenuSystem` example uses: a fixed in-canvas height on a pixel
+    /// `AppMenu` example uses: a fixed in-canvas height on a pixel
     /// backend, one cell on TUI).
     fn menu_bar_rect(backend: &dyn Backend) -> Rect {
         let vp = backend.viewport();
@@ -688,7 +693,7 @@ impl CalcApp {
     /// the common case costs nothing. With at least one, a third of
     /// `grid`'s own height (floored at 6 rows, and never more than
     /// leaves the cell grid itself 4 rows) is carved off the bottom for
-    /// [`View::screen`] to push a `Surface::Chart` into, the same "one
+    /// [`View::screen`] to push a `Chart` widget into, the same "one
     /// more chrome band" carving `carve_tab_strip` already does for the
     /// sheet-tabs strip.
     fn carve_chart_panel(grid: Rect, chart_count: usize) -> (Rect, Option<Rect>) {
@@ -905,27 +910,21 @@ impl CalcApp {
             .map(|stats| Self::selection_stats_label(&stats))
             .unwrap_or_default();
 
-        // `TabBar`'s backend contract (`quadraui::TabBar::layout`'s doc):
-        // resolve this frame's scroll offset against the backend's own
-        // measurements and write the corrected value back before this
-        // same frame paints, rather than waiting for the next one — an
-        // `activate_sheet` that lands past the bar's visible range must
-        // make that tab visible immediately, not after one more event.
-        //
-        // `Backend::resolve_tab_bar_layout`'s `TabBarLayout` is not what
-        // computes this: every current backend passes `0.0` for
-        // `scroll_arrow_width`, which (per `TabBar::layout`'s own doc)
-        // puts it in the "caller owns scroll" branch that just echoes
-        // `bar.scroll_offset` back clamped, rather than fitting it to the
-        // active tab. `Backend::tab_bar_layout`'s `TabBarHits` is the one
-        // that actually measures: its `correct_scroll_offset` is
-        // documented as "the offset that would make the active tab
-        // visible given this frame's actual measurements".
+        // `TabBar`'s contract (`TabBarPrimitiveLayout::
+        // corrected_scroll_offset`'s doc): resolve this frame's scroll
+        // offset against the backend's own measurements and write the
+        // corrected value back before this same frame paints, rather
+        // than waiting for the next one — an `activate_sheet` that lands
+        // past the bar's visible range must make that tab visible
+        // immediately, not after one more event. `layout.
+        // resolved_scroll_offset` is not what computes this: it is only
+        // the stored offset clamped to a valid index, not fitted to the
+        // active tab.
         let tab_bar_rect = self.tab_bar_rect(backend);
         let provisional_bar = sheets::tab_bar(&self.session, self.tab_scroll);
         self.tab_scroll = backend
-            .tab_bar_layout(tab_bar_rect, &provisional_bar)
-            .correct_scroll_offset;
+            .layout_primitive(tab_bar_rect, &provisional_bar)
+            .corrected_scroll_offset;
         let tab_bar = sheets::tab_bar(&self.session, self.tab_scroll);
 
         // Re-fetched only while open — see `View::sidebar_names`'s own
@@ -947,7 +946,7 @@ impl CalcApp {
         // greys out the instant there's nothing left to undo. Cheap
         // enough to rebuild every refresh (same cost the palette already
         // pays every time it opens) rather than tracking what changed.
-        self.menu_system.set_menus(menu::menus(&self.session));
+        self.app_menu.set_menus(menu::menus(&self.session));
 
         self.view = View {
             grid: Some(grid),
@@ -1069,9 +1068,9 @@ impl View {
     /// formula bar, grid, chart panel, tab strip, status bar.
     fn screen(&self, bands: Bands) -> ScreenLayout {
         let mut layout = ScreenLayout::new();
-        layout.push(Surface::TextField {
+        layout.push(Surface::Widget {
             rect: bands.formula,
-            tf: self.formula.clone(),
+            widget: Box::new(self.formula.clone()),
         });
         let (grid_rect, tab_bar_rect) = CalcApp::carve_tab_strip(bands);
         let (cell_rect, chart_rect) = CalcApp::carve_chart_panel(grid_rect, self.charts.len());
@@ -1087,19 +1086,16 @@ impl View {
         if let Some(panel) = chart_rect {
             let each = panel.height / self.charts.len() as f32;
             for (i, chart) in self.charts.iter().enumerate() {
-                layout.push(Surface::Chart {
+                layout.push(Surface::Widget {
                     rect: Rect::new(panel.x, panel.y + each * i as f32, panel.width, each),
-                    chart: chart.clone(),
-                    hovered_point: None,
-                    crosshair_x: None,
+                    widget: Box::new(chart.clone()),
                 });
             }
         }
         if let Some(bar) = &self.tab_bar {
-            layout.push(Surface::TabBar {
+            layout.push(Surface::Widget {
                 rect: tab_bar_rect,
-                bar: bar.clone(),
-                hovered_close: None,
+                widget: Box::new(bar.clone()),
             });
         }
         layout.push(self.status_surface(bands.status));
@@ -1157,11 +1153,9 @@ impl View {
                 right
             },
         };
-        Surface::StatusBar {
+        Surface::Widget {
             rect,
-            bar,
-            hovered: None,
-            pressed: None,
+            widget: Box::new(bar),
         }
     }
 }
@@ -1188,30 +1182,29 @@ impl AppLogic for CalcApp {
         // the palette/format-picker checks below rather than after.
         if let Some(rect) = self.sidebar_rect(backend) {
             let panel = sidebar::toolbar_panel(self.view.sidebar_names.len());
-            // `backend.sidebar_panel_layout`, not the primitive's own
-            // pure `SidebarPanel::layout`: `content_bounds` doesn't
-            // depend on button widths, but reusing the same call
-            // `handle_sidebar_click` hit-tests against keeps this from
-            // ever silently drifting from what's actually painted.
-            let panel_layout = backend.sidebar_panel_layout(rect, &panel);
-            layout.push(Surface::SidebarPanel {
+            // The same `layout_primitive` call `handle_sidebar_click`
+            // hit-tests against, so the list's rect can never silently
+            // drift from what's actually painted.
+            let panel_layout = backend.layout_primitive(rect, &panel);
+            layout.push(Surface::Widget {
                 rect,
-                panel,
-                hovered: None,
-                pressed: None,
+                widget: Box::new(panel),
             });
-            layout.push(Surface::List {
+            layout.push(Surface::Widget {
                 rect: panel_layout.content_bounds,
-                list: sidebar::list_view(&self.view.sidebar_names, self.sidebar.selected()),
+                widget: Box::new(sidebar::list_view(
+                    &self.view.sidebar_names,
+                    self.sidebar.selected(),
+                )),
             });
         }
         // On top of everything else — the palette is a modal overlay,
         // so it paints last, same as `ScreenLayout`'s own
         // back-to-front push order for every other overlay surface.
         if let Some(palette) = &self.palette {
-            layout.push(Surface::Palette {
+            layout.push(Surface::Widget {
                 rect: Self::palette_rect(backend),
-                palette: palette.palette(),
+                widget: Box::new(palette.palette()),
             });
         }
         // On top of the palette too (the two are mutually exclusive —
@@ -1227,42 +1220,39 @@ impl AppLogic for CalcApp {
         // Mutually exclusive with both the palette and the format picker
         // (`handle`'s own modal-routing order again), so "paints last"
         // never actually layers it over either in practice — same
-        // `Surface::Palette` path as `palette` above, since this is the
+        // `Palette` widget path as `palette` above, since this is the
         // same primitive over a different list.
         if let Some(picker) = &self.function_picker {
-            layout.push(Surface::Palette {
+            layout.push(Surface::Widget {
                 rect: Self::palette_rect(backend),
-                palette: picker.palette(),
+                widget: Box::new(picker.palette()),
             });
         }
         let menu_bar_rect = Self::menu_bar_rect(backend);
-        // `MenuSystem::menu_bar()` returns the bar's full declarative
+        // `AppMenu::build_menu_bar()` returns the bar's full declarative
         // descriptor — every item, each carrying its *entire* submenu
-        // tree regardless of whether a dropdown is actually open (see
-        // that method's own doc) — so pushing it is what keeps the menu
-        // (not just the grid/status bar) visible to the accessibility
-        // tree and to agents over MCP, per this repo's CLAUDE.md: "Paint
-        // through ScreenLayout... Don't call backend.draw_* directly."
-        // Paints the bar itself a second time, below, with the correct
-        // hover-interaction tint `menu_system.render` resolves and this
-        // plain descriptor push cannot — harmless, since that repaint
-        // runs after this one and the pixels are identical otherwise.
-        layout.push(Surface::MenuBar {
+        // tree regardless of whether a dropdown is actually open — so
+        // pushing it is what keeps the menu (not just the grid/status
+        // bar) visible to the accessibility tree and to agents over MCP,
+        // per this repo's CLAUDE.md: "Paint through ScreenLayout...
+        // Don't call backend.draw_* directly." The bar, not the
+        // `AppMenu` itself: an `AppMenu` pushed as a widget would also
+        // queue its dropdown as a popup, which the runner skips while
+        // the dropdown sits on the modal stack anyway (see below).
+        layout.push(Surface::Widget {
             rect: menu_bar_rect,
-            bar: self.menu_system.menu_bar(),
+            widget: Box::new(self.app_menu.build_menu_bar()),
         });
         let _ = layout.draw(backend);
-        // The one thing `Surface::MenuBar` above can't carry: an open
-        // dropdown's actual popup. `MenuSystem::render` paints that (and
-        // repaints the bar itself, this time hover-aware) straight
-        // through `Backend::draw_menu_bar_with_state`/`draw_context_menu`
-        // — quadraui exposes no public accessor for the open dropdown's
-        // own `ContextMenu`/layout to push as a `Surface::ContextMenu`
-        // instead (`MenuSystem::dropdown_stack` is private), so this one
-        // piece stays a direct backend call. Painted last, same
-        // "topmost overlay" reasoning as the palette above — an open
-        // dropdown must sit over the grid/status bar it's anchored above.
-        self.menu_system.render(backend, menu_bar_rect);
+        // The one thing the bar above can't carry: an open dropdown's
+        // actual cascade. `AppMenu::handle_ui_event` puts an open
+        // dropdown on the modal stack, and the runner's popup pass
+        // paints nothing while a modal is open, so `AppMenu::render`
+        // paints it (and repaints the bar itself — identical pixels).
+        // Painted last, same "topmost overlay" reasoning as the palette
+        // above — an open dropdown must sit over the grid/status bar
+        // it's anchored above.
+        self.app_menu.render(backend, menu_bar_rect);
     }
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {
@@ -1394,14 +1384,14 @@ impl AppLogic for CalcApp {
         // The menu bar takes priority over everything below — Alt+key
         // mnemonics and in-dropdown arrow/Enter navigation must work no
         // matter what else is focused, the same precedence `quadraui`'s
-        // own `MenuSystem` example gives it. While a dropdown is open
+        // own `AppMenu` example gives it. While a dropdown is open
         // this also swallows every mouse event, the same modal
         // interception the palette above gives itself; `Ignored` (the
         // overwhelming majority of events — typing into a cell, grid
         // navigation) falls through to everything below unchanged.
         //
         // Guarded by "outside an active edit" like every other shortcut
-        // in this function: `MenuSystem::handle` has no notion of
+        // in this function: `AppMenu::handle_ui_event` has no notion of
         // whether a cell/formula-bar edit is in progress, so an
         // unconditional call would let Alt+<mnemonic letter> open a
         // dropdown mid-edit, leaving that edit's buffer dangling with no
@@ -1412,9 +1402,16 @@ impl AppLogic for CalcApp {
         // not a commit-then-proceed.
         if self.grid.editing.is_none() && !self.formula_focused {
             let menu_bar_rect = Self::menu_bar_rect(backend);
-            match self.menu_system.handle(&event, backend, menu_bar_rect) {
-                MenuEvent::Activated(id) if id.as_str() == menu::QUIT => return Reaction::Exit,
-                MenuEvent::Activated(id) => {
+            match self.app_menu.handle_ui_event(
+                &mut self.app_menu_state,
+                &event,
+                backend,
+                menu_bar_rect,
+            ) {
+                Handled::Event(AppMenuEvent::Activated(id)) if id.as_str() == menu::QUIT => {
+                    return Reaction::Exit;
+                }
+                Handled::Event(AppMenuEvent::Activated(id)) => {
                     let id_str = id.as_str();
                     // Same "open a picker instead of running it" branch the
                     // palette's own `PaletteOutcome::Pick` uses — a menu
@@ -1502,11 +1499,11 @@ impl AppLogic for CalcApp {
                     self.refresh(backend);
                     return Reaction::Redraw;
                 }
-                MenuEvent::StateChanged | MenuEvent::Consumed => {
+                Handled::Event(_) | Handled::Consumed => {
                     self.refresh(backend);
                     return Reaction::Redraw;
                 }
-                _ => {}
+                Handled::Ignored => {}
             }
         }
         // Ctrl+Shift+P (Cmd+Shift+P on macOS), or a bare `:` on a
@@ -1529,14 +1526,16 @@ impl AppLogic for CalcApp {
                 if let Err(e) = self.sync_selection() {
                     self.error = Some(e.to_string());
                 }
-                // `MenuSystem::handle` above has no arm for this chord,
+                // `AppMenu::handle_ui_event` above routes no closed-menu
+                // key but an Alt mnemonic, and no open-menu key matches
+                // this chord either,
                 // so it falls through here `Ignored` even while a
                 // dropdown is open (no mnemonic/arrow/Enter/mouse
                 // shape matches it). Without this, the menu's own
                 // `open_item` would stay `Some` underneath — and, once
                 // the palette later closes, interactive again — while
                 // the palette is modally open on top of it.
-                self.menu_system.close(backend);
+                self.app_menu.dismiss(backend);
                 self.palette = Some(CommandPalette::open(&self.session));
                 return Reaction::Redraw;
             }
@@ -1594,7 +1593,8 @@ impl AppLogic for CalcApp {
                     let local_x = position.x - rect.x;
                     let local_y = position.y - rect.y;
                     if let TabBarHit::Tab(i) = backend
-                        .resolve_tab_bar_layout(rect, &bar)
+                        .layout_primitive(rect, &bar)
+                        .layout
                         .hit_test(local_x, local_y)
                         && let Err(e) = self.activate_sheet(i)
                     {
@@ -1819,7 +1819,7 @@ impl AppLogic for CalcApp {
         // no earlier check claimed) is left alone.
         let rect = self.grid_rect(backend);
         let layout = Self::grid_layout(&self.grid, backend, rect);
-        let units = Self::layout_ctx(backend).units();
+        let units = Self::units(backend);
         let routed = match &event {
             UiEvent::MouseDown {
                 button: MouseButton::Left,
@@ -1909,32 +1909,28 @@ impl AppLogic for CalcApp {
 }
 
 impl CalcApp {
-    /// [`LayoutCtx`] resolved from `backend` — the same chrome-metric
-    /// resolution `Backend::draw_primitive` applies before calling
-    /// [`Primitive::layout`], built by hand here since this app resolves
-    /// `CellGrid`'s layout once per frame/event to window its cells or
-    /// hit-test a click rather than through a `draw_primitive` call
-    /// (which would also paint). Mirrors quadraui's own
+    /// The unit system `backend` lays primitives out in — what
+    /// [`CellGrid::handle`]'s host reports through
+    /// [`EventHost::units`]. Resolved from the same chrome row height
+    /// `DrawsPrimitives::layout_primitive` hands every widget, so it
+    /// always agrees with [`Self::grid_layout`]. Mirrors quadraui's own
     /// `examples/common/cell_grid_demo.rs::layout_ctx`.
-    fn layout_ctx(backend: &dyn Backend) -> LayoutCtx {
-        LayoutCtx {
-            line_height: LayoutCtx::resolve_row_height(
-                backend.chrome_line_height(),
-                &backend.style(),
-            ),
-            char_width: backend.char_width(),
-            nerd_fonts_enabled: backend.nerd_fonts_enabled(),
-        }
+    fn units(backend: &dyn Backend) -> Units {
+        LayoutCtx::new(
+            LayoutCtx::resolve_row_height(backend.chrome_line_height(), &backend.style()),
+            backend.char_width(),
+            backend.nerd_fonts_enabled(),
+        )
+        .units()
     }
 
-    /// `Primitive::layout` resolved for `grid` at `rect` — called
-    /// through the trait explicitly (not `grid.layout(...)`) since
-    /// `CellGrid` also has its own unrelated six-argument inherent
-    /// `layout` method (see that method's own doc) that dot-call syntax
-    /// would otherwise prefer. Mirrors quadraui's own
-    /// `examples/common/cell_grid_demo.rs::grid_layout`.
+    /// `grid`'s layout at `rect`, resolved through the backend's own
+    /// `layout_primitive` — the same ctx (measurer, style, row-height
+    /// floor) the `Surface::Widget` `View::screen` pushes is painted
+    /// with, so a click or a viewport window computed here always
+    /// matches what's on screen.
     fn grid_layout(grid: &CellGrid, backend: &dyn Backend, rect: Rect) -> CellGridPrimitiveLayout {
-        Primitive::layout(grid, &Self::layout_ctx(backend), rect)
+        backend.layout_primitive(rect, grid)
     }
 
     /// Route one already-converted [`RoutedEvent`] into `self.grid`'s own
@@ -2075,35 +2071,28 @@ impl CalcApp {
     /// title/count labels, the gap past the last row) is a no-op.
     fn handle_sidebar_click(&mut self, position: Point, rect: Rect, backend: &dyn Backend) {
         let panel = sidebar::toolbar_panel(self.view.sidebar_names.len());
-        let layout = backend.sidebar_panel_layout(rect, &panel);
+        let layout = backend.layout_primitive(rect, &panel);
         match layout.hit_test(position.x, position.y) {
             SidebarPanelHit::ToolbarButton(id) if id == sidebar::close_button_id() => {
                 self.sidebar.close();
             }
             SidebarPanelHit::Content { x, y } => {
                 let list = sidebar::list_view(&self.view.sidebar_names, self.sidebar.selected());
-                // `backend.list_layout`, not a bare `line_height`-only
-                // `ListView::layout` call: `line_height` is the
-                // *editor* font metric, while every backend's `draw_list`
-                // paints rows at its own resolved row pitch (GTK/macOS/
-                // Win floor `Style::row_height` at the chrome font; TUI's
-                // is always a whole cell) and reserves a scrollbar column
-                // once the list overflows. `Backend::list_layout` is each
-                // backend's own no-paint twin of that exact resolver —
-                // deprecated in favour of the generic
-                // `DrawsPrimitives::draw_primitive`, but that path needs
-                // a concretely-typed `&mut self` backend, not the
-                // `&dyn Backend` `AppLogic::handle` hands this method —
-                // so this stays the only object-safe way to reach it
-                // (quadraui#2609 tracks a dyn-safe replacement).
+                // `layout_primitive`, not a bare `line_height`-only
+                // `ListView::layout` call: `line_height` is the *editor*
+                // font metric, while the list paints rows at the
+                // backend's own resolved row pitch (a whole cell on TUI;
+                // `Style::row_height` floored at the chrome font on
+                // GTK/macOS/Win) and reserves a scrollbar column once it
+                // overflows — the same ctx the `Surface::Widget` `render`
+                // pushes for it is painted with.
                 let area = Rect::new(
                     0.0,
                     0.0,
                     layout.content_bounds.width,
                     layout.content_bounds.height,
                 );
-                #[allow(deprecated)]
-                let list_layout = backend.list_layout(area, &list);
+                let list_layout = backend.layout_primitive(area, &list).layout;
                 if let ListViewHit::Item(idx) = list_layout.hit_test(x, y) {
                     self.sidebar.select(idx, self.view.sidebar_names.len());
                 }

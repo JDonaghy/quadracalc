@@ -11,18 +11,21 @@ repository = "https://github.com/JDonaghy/quadracalc"
 publish = false
 
 [workspace.dependencies]
-# quadraui is pinned to a develop revision until 0.12 is published, because
-# CellGrid (quadraui#2732) only exists on develop. Past quadraui#2918/#2920
-# CellGrid is a widget-contract `Interactive` primitive reached through
-# `Surface::Widget`, not a bespoke `Surface::CellGrid` variant — see
-# `quadracalc-core::app`'s module doc. Switch to `quadraui = "0.12"` once
-# it's released.
-quadraui = { git = "https://github.com/JDonaghy/quadraui", rev = "c67950d780a80685e87b678c5241328d09e907aa", default-features = false }
+# quadraui is pinned to a develop revision until 0.12 is published: this
+# is the `quadraui-0.12-migration` branch, pre-adopting the 0.12 widget
+# contract (quadraui widget-contract W7b, 6f501cdd). Every surface is a
+# `Surface::Widget` (CellGrid, TabBar, StatusBar, TextField, Chart,
+# SidebarPanel, ListView, Palette, MessageDialog, the menu's MenuBar),
+# geometry comes from `DrawsPrimitives::layout_primitive`, and the menu is
+# the `AppMenu` widget. W8/W9 are still landing on develop; re-pin to the
+# 0.12.0 release with `quadraui = "0.12"` once it's published, then merge
+# this branch.
+quadraui = { git = "https://github.com/JDonaghy/quadraui", rev = "6f501cdd738af49c366ab5ca9972ec4ee5917f7e", default-features = false }
 # Same repo/revision as `quadraui` above: the MCP server that turns a
 # running quadraui app's backend-neutral control channel into stdio/
 # Unix-socket `snapshot`/`act`/`key`/`type` tools, plus one tool per
 # app-defined Level 2 command (see `quadraui::control`'s "Levels" doc).
-quadraui-mcp = { git = "https://github.com/JDonaghy/quadraui", rev = "c67950d780a80685e87b678c5241328d09e907aa" }
+quadraui-mcp = { git = "https://github.com/JDonaghy/quadraui", rev = "6f501cdd738af49c366ab5ca9972ec4ee5917f7e" }
 # GridCraft's engine, used unchanged and pinned by full SHA. Never fork it;
 # upstream any fix to storytold/gridcraft instead.
 gridcraft-engine = { git = "https://github.com/storytold/gridcraft", rev = "3b062063270e37c6f8c1fcbfb2ea206e6d1f868b" }

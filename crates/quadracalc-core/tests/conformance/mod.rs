@@ -311,7 +311,7 @@ pub fn open_formulas_menu_opens_function_picker<D: ConformanceDriver>(d: &mut D)
 /// dropdown — open Home, confirm a group label (not one of its nested
 /// items) is what's on screen first, open that group's submenu and
 /// confirm a nested item is now visible, then switch to the Clipboard
-/// group and confirm its accelerator hint renders. `MenuSystem`'s submenu
+/// group and confirm its accelerator hint renders. `AppMenu`'s submenu
 /// state machine is backend-neutral (same as [`open_menu_and_quit`]'s
 /// dispatch), so this runs against every driver, not just `TuiDriver`.
 /// Needs a blank `CalcApp::new()` as its fixture.
@@ -358,7 +358,7 @@ pub fn home_menu_has_grouped_submenus_with_shortcut_hints<D: ConformanceDriver>(
 
 /// Clicking the menu's "Save" item on a workbook with no backing file
 /// should surface `CalcApp::save`'s own "nothing to save to yet" error,
-/// not silently succeed. `MenuEvent::Activated`'s dispatch special-cases
+/// not silently succeed. `AppMenuEvent::Activated`'s dispatch special-cases
 /// `file.save` to call `CalcApp::save` the same way Ctrl+S's keyboard
 /// dispatch does; a bare `execute("file.save", {})` instead would hit
 /// the engine's `UiRequest::Dialog("saveAs", ...)` fallback, return `Ok`,
@@ -377,5 +377,78 @@ pub fn menu_save_with_no_file_shows_the_save_error<D: ConformanceDriver>(d: &mut
         d.screen_has("nothing to save"),
         "activating Save through the menu with no backing file should show \
          `CalcApp::save`'s own error in the status bar, not succeed silently"
+    );
+}
+
+/// Ctrl+Shift+P — the palette chord with the same modifiers on every
+/// backend (`CalcApp::handle` accepts Ctrl or Cmd).
+fn ctrl_shift_p() -> UiEvent {
+    UiEvent::KeyPressed {
+        key: Key::Char('P'),
+        modifiers: Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Modifiers::default()
+        },
+        repeat: false,
+    }
+}
+
+/// Open the Number Format picker from the palette and *click* one of
+/// its choices — the picker's mouse path, which hit-tests the click
+/// against `quadraui::MessageDialog`'s own layout of the dialog it
+/// painted. The keyboard path has TUI coverage in `tests/format_cells.rs`;
+/// the click has to land on the right button on a pixel backend too,
+/// where button widths come from real text measurement. Needs a blank
+/// `CalcApp::new()` as its fixture.
+pub fn click_a_format_picker_choice<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    d.type_text("1234");
+    ConformanceDriver::press_named(d, NamedKey::Enter); // commits A1, moves to A2
+    ConformanceDriver::press_named(d, NamedKey::Up); // back to A1
+
+    d.dispatch(ctrl_shift_p());
+    d.type_text("number format");
+    ConformanceDriver::press_named(d, NamedKey::Enter);
+    assert!(
+        d.screen_has("Currency, no decimals"),
+        "running Number Format from the palette should open its picker"
+    );
+
+    d.click_text("Currency, no decimals");
+    assert!(
+        !d.screen_has("Cancel"),
+        "clicking a choice should close the picker"
+    );
+    assert!(
+        d.screen_has("$1,234"),
+        "the clicked choice's currency format should apply to A1"
+    );
+}
+
+/// The palette chord pressed while a menu dropdown is open closes the
+/// dropdown and opens the palette, rather than leaving the dropdown
+/// open (and interactive again once the palette closes) underneath it.
+/// Needs a blank `CalcApp::new()` as its fixture.
+pub fn palette_chord_closes_an_open_menu<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    d.click_text("File");
+    assert!(
+        d.screen_has("Quit"),
+        "clicking File should open its dropdown"
+    );
+
+    d.dispatch(ctrl_shift_p());
+    assert!(
+        d.screen_has("Commands"),
+        "Ctrl+Shift+P should open the command palette even with a dropdown open"
+    );
+    assert!(
+        !d.screen_has("Quit"),
+        "opening the palette should close the File dropdown"
+    );
+
+    ConformanceDriver::press_named(d, NamedKey::Escape);
+    assert!(
+        !d.screen_has("Quit"),
+        "closing the palette should not bring the dropdown back"
     );
 }

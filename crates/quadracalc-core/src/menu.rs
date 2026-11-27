@@ -193,7 +193,7 @@ fn classified_action(e: &Entry) -> ContextMenuItem {
 /// macOS, though: `quadraui::macos::menu_bar_install` installs every
 /// leaf's `key_equivalent` as a *real* `NSMenu` key equivalent, so AppKit
 /// matches it before `handle` ever sees the keypress and delivers
-/// `MenuEvent::Activated` instead. `CalcApp::handle`'s own `Activated` arm
+/// `AppMenuEvent::Activated` instead. `CalcApp::handle`'s own `Activated` arm
 /// special-cases exactly the ids that need more than a bare `execute` —
 /// Copy, Cut, Paste, Save — the same way the keyboard dispatch does, so
 /// that reroute stays behaviourally equivalent.
@@ -234,8 +234,8 @@ fn action(id: &str, label: &str) -> ContextMenuItem {
 
 /// A submenu-parent item for one `Entry::group`. Needs its own `id` (a
 /// synthetic one, distinct from every catalog id) even though clicking it
-/// never reaches `CalcApp::handle` as `MenuEvent::Activated` — `quadraui`'s
-/// `MenuSystem` opens the nested popup instead — because
+/// never reaches `CalcApp::handle` as `AppMenuEvent::Activated` — `quadraui`'s
+/// `AppMenu` opens the nested popup instead — because
 /// `ContextMenuItem::is_separator` (and the TUI rasteriser's hit-testing)
 /// treats a `None` id as a non-interactive separator, which a submenu
 /// parent plainly isn't.
