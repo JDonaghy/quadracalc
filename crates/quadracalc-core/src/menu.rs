@@ -92,7 +92,9 @@ pub fn menus_for(session: &Session, banded_rows: bool) -> Vec<MenuDef> {
         if !file.items.is_empty() {
             file.items.push(separator());
         }
-        file.items.push(action(QUIT, "Quit"));
+        let mut quit = action(QUIT, "Quit");
+        quit.key_equivalent = Some(accelerator(QUIT, KeyBinding::Quit));
+        file.items.push(quit);
     }
     if let Some(view) = menus.iter_mut().find(|m| m.id.as_str() == "menu:view") {
         if !view.items.is_empty() {
@@ -308,6 +310,11 @@ mod tests {
         assert_eq!(file.label, "&File");
         let last = file.items.last().unwrap();
         assert_eq!(last.id, Some(WidgetId::new(QUIT)));
+        assert_eq!(
+            last.key_equivalent.as_ref().map(|a| a.binding.clone()),
+            Some(KeyBinding::Quit),
+            "Quit shows the Ctrl+Q/Cmd+Q shortcut it has"
+        );
         let separator = &file.items[file.items.len() - 2];
         assert_eq!(separator.id, None);
     }

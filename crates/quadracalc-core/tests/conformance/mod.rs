@@ -556,6 +556,163 @@ pub fn replace_all_through_the_find_panel<D: ConformanceDriver + DriverInput>(d:
     assert!(!d.screen_has("ab cd"), "A2's old text should be gone");
 }
 
+/// Replace All only rewrites cells the panel counted, and with the
+/// replace row showing the count is taken over what the user typed — the
+/// text `edit.replace` rewrites. Needs `CalcApp::with_sample()` as its
+/// fixture: B2 is a currency-formatted 1200.5 (shown "$1,200.50"), and
+/// "D2" appears only inside formulas (E2's `VLOOKUP(D2,…)` and others).
+pub fn replace_all_only_touches_counted_cells<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    // Find alone looks at what cells show: no cell shows "D2".
+    ConformanceDriver::ctrl_char(d, 'f');
+    d.type_text("D2");
+    assert!(d.screen_has("No results"), "no cell displays \"D2\"");
+    // With the replace row it looks at what was typed, and says so.
+    ConformanceDriver::ctrl_char(d, 'h');
+    assert!(
+        !d.screen_has("No results"),
+        "replace mode counts the formulas a replace would rewrite"
+    );
+    ConformanceDriver::press_named(d, NamedKey::Escape);
+
+    // "1200" is in B2's typed input but not in anything Find counts
+    // (its shown text has a thousands separator), so Replace All must
+    // leave it alone.
+    ConformanceDriver::ctrl_char(d, 'h');
+    d.type_text("1200");
+    assert!(d.screen_has("No results"));
+    ConformanceDriver::press_named(d, NamedKey::Tab);
+    d.type_text("9");
+    d.dispatch(key_with(
+        Key::Named(NamedKey::Enter),
+        Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    ));
+    assert!(
+        !d.screen_has("Replaced"),
+        "nothing was counted, so nothing is replaced"
+    );
+    assert!(d.screen_has("$1,200.50"), "B2 must be unchanged");
+}
+
+/// Pointer gestures on the floating find panel stay with the panel: a
+/// double-click (two quick presses) or a right-click on it never reaches
+/// the grid cell underneath. Needs `CalcApp::with_sample()` as its
+/// fixture: "yes" first matches F16.
+pub fn find_panel_keeps_its_own_pointer_gestures<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    ConformanceDriver::ctrl_char(d, 'f');
+    d.type_text("yes");
+    assert!(d.screen_has("1 of 7") && d.screen_has("F16"));
+
+    // A pixel backend paints the count as one run; the TUI paints it
+    // word by word, the panel's "of" being the topmost one on screen.
+    let has_run = |d: &D, text: &str| {
+        d.inventory()
+            .text_runs()
+            .iter()
+            .any(|r| r.text.contains(text))
+    };
+    let on_panel = if has_run(d, "1 of 7") {
+        locate(d, "1 of 7")
+    } else {
+        locate(d, "of")
+    };
+    d.dispatch(UiEvent::DoubleClick {
+        widget: None,
+        position: on_panel,
+    });
+    assert!(
+        d.screen_has("F16") && d.screen_has("FIND"),
+        "a double-click on the panel must not move the cursor or start an edit"
+    );
+    assert!(!d.screen_has("EDIT"), "no cell edit was opened");
+
+    d.dispatch(UiEvent::MouseDown {
+        widget: None,
+        button: quadraui::MouseButton::Right,
+        position: on_panel,
+        modifiers: Modifiers::default(),
+    });
+    assert!(
+        !d.screen_has("Insert Row"),
+        "a right-click on the panel must not open the grid's context menu"
+    );
+
+    // Typing still goes to the panel's query.
+    d.type_text("x");
+    assert!(d.screen_has("No results"), "\"yesx\" matches nothing");
+}
+
+/// While the find panel has the keyboard, an app shortcut it doesn't use
+/// itself still works: Ctrl+Z undoes the last edit. Needs a blank
+/// `CalcApp::new()` as its fixture.
+pub fn shortcuts_work_while_the_find_panel_has_the_keyboard<D: ConformanceDriver + DriverInput>(
+    d: &mut D,
+) {
+    d.type_text("hello");
+    ConformanceDriver::press_named(d, NamedKey::Enter);
+    ConformanceDriver::ctrl_char(d, 'f');
+    d.type_text("hel");
+    assert!(d.screen_has("1 of 1"));
+    ConformanceDriver::ctrl_char(d, 'z');
+    assert!(
+        !d.screen_has("hello"),
+        "Ctrl+Z should undo A1's entry with the panel focused"
+    );
+}
+
+/// Quitting takes Ctrl+Q (Cmd+Q): a bare `q` types into a cell and
+/// Escape never quits; with unsaved changes the first Ctrl+Q only warns
+/// and a second one in a row quits. Needs a blank `CalcApp::new()` as
+/// its fixture.
+pub fn ctrl_q_quits_and_asks_first_with_unsaved_changes<D: ConformanceDriver + DriverInput>(
+    d: &mut D,
+) {
+    d.type_text("quota");
+    ConformanceDriver::press_named(d, NamedKey::Enter);
+    assert!(!d.exited(), "a bare q must not quit");
+    assert!(
+        d.screen_has("quota"),
+        "q starts a cell entry like any letter"
+    );
+    ConformanceDriver::press_named(d, NamedKey::Escape);
+    assert!(!d.exited(), "Escape must not quit");
+
+    ConformanceDriver::ctrl_char(d, 'q');
+    assert!(!d.exited(), "unsaved changes: the first Ctrl+Q only warns");
+    assert!(d.screen_has("Unsaved changes"));
+    // Another key in between answers the warning with "no".
+    ConformanceDriver::press_named(d, NamedKey::Down);
+    ConformanceDriver::ctrl_char(d, 'q');
+    assert!(!d.exited(), "a key in between re-arms the warning");
+    assert!(d.screen_has("Unsaved changes"));
+    ConformanceDriver::ctrl_char(d, 'q');
+    assert!(d.exited(), "a second Ctrl+Q in a row quits");
+}
+
+/// File › Quit asks first with unsaved changes too, and a second File ›
+/// Quit (no key pressed, nothing changed) quits. Needs a blank
+/// `CalcApp::new()` as its fixture.
+pub fn menu_quit_asks_first_with_unsaved_changes<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    d.type_text("x");
+    ConformanceDriver::press_named(d, NamedKey::Enter);
+    d.click_text("File");
+    d.click_text("Quit");
+    assert!(!d.exited(), "unsaved changes: the first Quit only warns");
+    assert!(d.screen_has("Unsaved changes"));
+    d.click_text("File");
+    d.click_text("Quit");
+    assert!(d.exited(), "a second Quit quits");
+}
+
+/// With nothing unsaved, Ctrl+Q (Cmd+Q) quits at once. Needs a blank
+/// `CalcApp::new()` as its fixture.
+pub fn ctrl_q_quits_a_clean_workbook<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    ConformanceDriver::ctrl_char(d, 'q');
+    assert!(d.exited());
+}
+
 /// Right-clicking a cell opens the grid's context menu at the pointer;
 /// clicking "Clear Contents" clears the clicked cell through
 /// `edit.clearContents` and closes the menu. Shift+F10 opens the same
@@ -603,28 +760,51 @@ pub fn context_menu_clears_a_cell<D: ConformanceDriver + DriverInput>(d: &mut D)
     assert!(!d.exited(), "Escape in the context menu must not quit");
 }
 
-/// The mouse wheel scrolls the grid while the frozen header row stays
-/// put, and scrolling back up brings the top rows back. Needs
-/// `CalcApp::with_sample()` as its fixture: row 1 is frozen.
-pub fn wheel_scrolls_under_a_frozen_header<D: ConformanceDriver + DriverInput>(d: &mut D) {
+/// The mouse wheel scrolls the grid without moving the cursor, and
+/// scrolling back up brings the top rows back. Needs
+/// `CalcApp::with_sample()` as its fixture.
+pub fn wheel_scrolls_the_view_not_the_cursor<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    let over_the_grid = locate(d, "Hosting");
     d.scroll_at("Hosting", -10);
     assert!(
         !d.screen_has("Hosting") && !d.screen_has("Domains"),
         "scrolling down should move rows 2-3 off screen"
     );
     assert!(
-        d.screen_has("Discounted Total"),
-        "the frozen header row should stay on screen"
-    );
-    assert!(
         d.screen_has("A1"),
         "the wheel scrolls the view, not the cursor"
     );
 
-    d.scroll_at("Discounted Total", 20);
+    // Far more than the way back in any backend's wheel unit: the
+    // scroll stops at the top.
+    d.dispatch(UiEvent::Scroll {
+        widget: None,
+        delta: quadraui::ScrollDelta::new(0.0, 1.0e4),
+        position: over_the_grid,
+    });
     assert!(
         d.screen_has("Hosting"),
         "scrolling back up should bring row 2 back"
+    );
+}
+
+/// One wheel notch scrolls three rows — not a screenful — whatever unit
+/// the backend reports the wheel in. Needs `CalcApp::with_sample()` as
+/// its fixture: rows 2-3 hold "Hosting"/"Domains", row 7 "Standard".
+///
+/// Only for drivers whose `scroll_at` sends what the real backend sends
+/// for a notch: TUI (cells) and macOS (points). `GtkDriver`/`WinDriver`
+/// send `lines × line_height` while the real GTK/Win32 backends report
+/// plain notches, so one `scroll_at` line there is many notches.
+pub fn one_wheel_notch_scrolls_three_rows<D: ConformanceDriver + DriverInput>(d: &mut D) {
+    d.scroll_at("Hosting", -1);
+    assert!(
+        !d.screen_has("Hosting") && !d.screen_has("Domains"),
+        "one notch should scroll rows 1-3 off screen"
+    );
+    assert!(
+        d.screen_has("Standard"),
+        "one notch should stop well short of row 7"
     );
 }
 

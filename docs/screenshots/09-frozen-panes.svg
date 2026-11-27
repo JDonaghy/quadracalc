@@ -44,19 +44,21 @@
 <text x="882" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">L</text>
 <text x="891" y="50" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <rect x="0" y="54" width="54" height="18" fill="#14161e"/>
-<rect x="54" y="54" width="90" height="18" fill="#3c5078"/>
-<rect x="144" y="54" width="351" height="18" fill="#1f4e79"/>
-<rect x="495" y="54" width="405" height="18" fill="#14161e"/>
-<text x="0" y="68" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">    1 </text>
-<text x="54" y="68" textLength="36" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Item</text>
+<rect x="54" y="54" width="441" height="18" fill="#2e75b6"/>
+<rect x="495" y="54" width="27" height="18" fill="#1c1e26"/>
+<rect x="522" y="54" width="216" height="18" fill="#2e75b6"/>
+<rect x="738" y="54" width="162" height="18" fill="#1c1e26"/>
+<text x="0" y="68" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   10 </text>
+<text x="54" y="68" textLength="45" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Month</text>
 <text x="135" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
-<text x="144" y="68" textLength="36" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Tier</text>
+<text x="162" y="68" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Revenue</text>
 <text x="243" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
-<text x="252" y="68" textLength="72" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Discount</text>
+<text x="261" y="68" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Growth</text>
 <text x="333" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
-<text x="342" y="68" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Discounted Total</text>
+<text x="360" y="68" textLength="108" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">Over target?</text>
 <text x="486" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="513" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="522" y="68" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold">At a glance</text>
 <text x="630" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="729" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="801" y="68" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
@@ -141,7 +143,9 @@
 <text x="342" y="158" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">no              </text>
 <text x="486" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="513" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="522" y="158" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">Jan→Dec</text>
 <text x="630" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
+<text x="639" y="158" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc">   192.50%</text>
 <text x="729" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="801" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="873" y="158" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
@@ -261,7 +265,6 @@
 <text x="135" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="153" y="302" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">$62,027.00</text>
 <text x="243" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
-<text x="270" y="302" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">192.50%</text>
 <text x="333" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <text x="342" y="302" textLength="63" lengthAdjust="spacingAndGlyphs" fill="#dcdcdc" font-weight="bold">7 of 12</text>
 <text x="486" y="302" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
@@ -415,11 +418,11 @@
 <text x="72" y="518" textLength="9" lengthAdjust="spacingAndGlyphs" fill="#3c3e48">│</text>
 <rect x="0" y="522" width="99" height="18" fill="#142d50"/>
 <rect x="99" y="522" width="54" height="18" fill="#21426e"/>
-<rect x="153" y="522" width="135" height="18" fill="#142d50"/>
-<rect x="288" y="522" width="522" height="18" fill="#21426e"/>
+<rect x="153" y="522" width="90" height="18" fill="#142d50"/>
+<rect x="243" y="522" width="567" height="18" fill="#21426e"/>
 <rect x="810" y="522" width="90" height="18" fill="#142d50"/>
 <text x="0" y="536" textLength="99" lengthAdjust="spacingAndGlyphs" fill="#ffffff" font-weight="bold"> READY  A1 </text>
 <text x="99" y="536" textLength="54" lengthAdjust="spacingAndGlyphs" fill="#e6e6e6"> Item </text>
-<text x="288" y="536" textLength="522" lengthAdjust="spacingAndGlyphs" fill="#c8d2e1"> F2 edit · Ctrl+F find · : commands · Alt+H menu · q quit </text>
+<text x="243" y="536" textLength="567" lengthAdjust="spacingAndGlyphs" fill="#c8d2e1"> F2 edit · Ctrl+F find · : commands · Alt+H menu · Ctrl+Q quit </text>
 <text x="810" y="536" textLength="90" lengthAdjust="spacingAndGlyphs" fill="#ffffff"> Count: 1 </text>
 </svg>

@@ -99,13 +99,60 @@ fn win_context_menu_clears_a_cell() {
 }
 
 #[test]
-fn win_wheel_scrolls_under_a_frozen_header() {
+fn win_wheel_scrolls_the_view_not_the_cursor() {
     let mut driver = WinDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
-    scenarios::wheel_scrolls_under_a_frozen_header(&mut driver);
+    scenarios::wheel_scrolls_the_view_not_the_cursor(&mut driver);
 }
 
 #[test]
 fn win_double_click_edits_in_place() {
     let mut driver = WinDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
     scenarios::double_click_edits_in_place(&mut driver);
+}
+
+#[test]
+fn win_replace_all_only_touches_counted_cells() {
+    let mut driver = WinDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::replace_all_only_touches_counted_cells(&mut driver);
+}
+
+#[test]
+fn win_find_panel_keeps_its_own_pointer_gestures() {
+    let mut driver = WinDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::find_panel_keeps_its_own_pointer_gestures(&mut driver);
+}
+
+#[test]
+fn win_shortcuts_work_while_the_find_panel_has_the_keyboard() {
+    let mut driver = WinDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::shortcuts_work_while_the_find_panel_has_the_keyboard(&mut driver);
+}
+
+#[test]
+fn win_ctrl_q_quits_and_asks_first_with_unsaved_changes() {
+    let mut driver = WinDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::ctrl_q_quits_and_asks_first_with_unsaved_changes(&mut driver);
+}
+
+#[test]
+fn win_ctrl_q_quits_a_clean_workbook() {
+    let mut driver = WinDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::ctrl_q_quits_a_clean_workbook(&mut driver);
+}
+
+#[test]
+fn win_menu_quit_asks_first_with_unsaved_changes() {
+    let mut driver = WinDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::menu_quit_asks_first_with_unsaved_changes(&mut driver);
+}
+
+/// Ignored: `WinDriver::scroll_at` sends `lines × line_height` as the wheel
+/// delta, but the real backend reports plain notches, so one
+/// `scroll_at` line arrives here as many notches. A quadraui testing gap,
+/// not an app one — the TUI and macOS runners do run this scenario.
+#[test]
+#[ignore = "WinDriver::scroll_at's delta unit differs from the real backend's (quadraui gap)"]
+fn win_one_wheel_notch_scrolls_three_rows() {
+    let mut driver = WinDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::one_wheel_notch_scrolls_three_rows(&mut driver);
 }

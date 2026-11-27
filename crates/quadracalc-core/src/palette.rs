@@ -164,11 +164,16 @@ fn no_terminal_surface(id: &str) -> Option<&'static str> {
 /// anything it can't parse (no brace group at all) is treated as
 /// "nothing required" rather than disabling the row, since a doc string
 /// this heuristic can't read is far more likely to be a `{}`-free command
-/// than a required field it failed to spot.
+/// than a required field it failed to spot. Prose inside the braces is
+/// not a field: everything after a top-level `;` is skipped, as is a
+/// "field" whose name runs straight on into another word
+/// (`{cell?: "B2"; without `cell`, unfreezes a frozen sheet}` requires
+/// nothing).
 fn unsuppliable_params(params: &str) -> Option<String> {
     let open = params.find('{')?;
     let close = matching_brace(params, open)?;
     let inner = params[open + 1..close].trim();
+    let inner = inner[..top_level_semicolon(inner).unwrap_or(inner.len())].trim();
     if inner.is_empty() {
         return None;
     }
@@ -183,7 +188,11 @@ fn unsuppliable_params(params: &str) -> Option<String> {
                 .find(|c: char| !(c.is_alphanumeric() || c == '_'))
                 .unwrap_or(field.len());
             let optional = field[name_end..].starts_with('?');
-            if optional {
+            let prose = name_end > 0
+                && field[name_end..]
+                    .trim_start()
+                    .starts_with(|c: char| c.is_alphanumeric());
+            if optional || prose {
                 None
             } else if name_end == 0 {
                 Some(field)
@@ -227,6 +236,22 @@ fn matching_brace(s: &str, open: usize) -> Option<usize> {
 /// `"…"` run — so `"range?: \"A1:B2\" | by?: rows|cols"` and
 /// `"columns?: [\"A\",\"C\"]"` each stay one field instead of splitting
 /// on the commas their own value lists carry.
+/// Byte index of the first `;` outside brackets and quotes in `s`.
+fn top_level_semicolon(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_quote = false;
+    for (i, b) in s.bytes().enumerate() {
+        match b {
+            b'"' => in_quote = !in_quote,
+            b'{' | b'[' | b'(' if !in_quote => depth += 1,
+            b'}' | b']' | b')' if !in_quote => depth -= 1,
+            b';' if !in_quote && depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn split_top_level(s: &str) -> Vec<&str> {
     let bytes = s.as_bytes();
     let mut out = Vec::new();
@@ -247,6 +272,21 @@ fn split_top_level(s: &str) -> Vec<&str> {
     }
     out.push(&s[start..]);
     out
+}
+
+/// How well `entry` matches the lowercased `query`, and which label
+/// characters to highlight. A fuzzy match on the label itself always
+/// outranks a match that needs the tab or group: those only count when
+/// the query appears in "label tab group" as one contiguous run, so a
+/// query scattered across a long category path ("freeze" in "Refresh
+/// PivotTable Analyze Data") doesn't match at all.
+fn match_entry(entry: &Entry, query: &str) -> Option<(i32, Vec<usize>)> {
+    const LABEL_BONUS: i32 = 1 << 20;
+    if let Some((score, positions)) = fuzzy_score(&entry.label.to_lowercase(), query) {
+        return Some((score.saturating_add(LABEL_BONUS), positions));
+    }
+    let haystack = format!("{} {} {}", entry.label, entry.tab, entry.group).to_lowercase();
+    haystack.contains(query).then(|| (0, Vec::new()))
 }
 
 /// What a key handled by [`CommandPalette::handle_key`] did.
@@ -329,12 +369,7 @@ impl CommandPalette {
             .iter()
             .enumerate()
             .filter_map(|(idx, entry)| {
-                let haystack =
-                    format!("{} {} {}", entry.label, entry.tab, entry.group).to_lowercase();
-                let (score, _) = fuzzy_score(&haystack, &query)?;
-                let positions = fuzzy_score(&entry.label.to_lowercase(), &query)
-                    .map(|(_, positions)| positions)
-                    .unwrap_or_default();
+                let (score, positions) = match_entry(entry, &query)?;
                 Some((score, idx, positions))
             })
             .collect();
@@ -524,6 +559,48 @@ mod tests {
             unsuppliable_params("{id, latex}"),
             Some("id, latex".to_string())
         );
+    }
+
+    #[test]
+    fn unsuppliable_params_skips_prose_after_the_fields() {
+        // view.freezePanes's own params doc.
+        assert_eq!(
+            unsuppliable_params(
+                "{sheet?, cell?: \"B2\" (rows above and columns left of it freeze); \
+                 without `cell`, unfreezes a frozen sheet}"
+            ),
+            None
+        );
+        // A word after a name is prose, but a parenthetical note keeps
+        // the field required.
+        assert_eq!(unsuppliable_params("{range?, unfreezes a sheet}"), None);
+        assert_eq!(
+            unsuppliable_params("{path (absolute)}"),
+            Some("path".to_string())
+        );
+    }
+
+    #[test]
+    fn a_label_match_outranks_a_category_path_and_scattered_paths_drop_out() {
+        let s = session();
+        let mut p = CommandPalette::open(&s);
+        for c in "freeze".chars() {
+            p.handle_key(&Key::Char(c), &Modifiers::default());
+        }
+        let rows = p.filtered();
+        let labels: Vec<_> = rows.iter().map(|e| (e.label, e.tab, e.group)).collect();
+        assert!(rows.iter().all(|e| e.label != "Refresh"), "{labels:?}");
+        assert!(rows[0].label.starts_with("Freeze"), "{labels:?}");
+    }
+
+    #[test]
+    fn freeze_panes_runs_from_the_palette() {
+        let s = session();
+        let freeze = entries(&s)
+            .into_iter()
+            .find(|e| e.id == "view.freezePanes")
+            .expect("view.freezePanes is in the catalog");
+        assert!(freeze.enabled, "{:?}", freeze.disabled_reason);
     }
 
     #[test]

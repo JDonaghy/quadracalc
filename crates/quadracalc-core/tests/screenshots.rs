@@ -255,16 +255,25 @@ fn capture_screenshots() {
     d.press_named(NamedKey::Enter);
     capture(&d, "04-find");
 
-    // Find and replace.
+    // Find and replace: replace mode looks in what was typed, so the
+    // quoted "no" is the IF's own label, and Replace All rewrites it in
+    // every Over target? formula.
     let mut d = driver();
     d.dispatch(ctrl_char('h'));
-    for c in "no".chars() {
+    for c in "\"no\"".chars() {
         d.type_char(c);
     }
     d.press_named(NamedKey::Tab);
-    for c in "not yet".chars() {
+    for c in "\"not yet\"".chars() {
         d.type_char(c);
     }
+    d.dispatch(key(
+        Key::Named(NamedKey::Enter),
+        Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+    ));
     capture(&d, "05-replace");
 
     // The grid's right-click menu.
@@ -293,8 +302,7 @@ fn capture_screenshots() {
     }
     capture(&d, "08-palette");
 
-    // Scrolled down and right with the wheel: row 1 and column A stay
-    // frozen.
+    // Scrolled down and right with the wheel: column A stays frozen.
     let mut d = driver();
     let (x, y) = at(&d, "Hosting");
     d.dispatch(UiEvent::Scroll {

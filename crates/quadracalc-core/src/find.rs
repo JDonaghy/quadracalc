@@ -9,20 +9,29 @@
 //! always; a click on the grid hands the keyboard back to the grid while
 //! leaving the panel open, so the user can look around between matches.
 //!
-//! Matching is the engine's: `edit.find` with `all: true` lists every hit
-//! against what each cell shows (Excel's "Look in: Values" — a formula
-//! cell matches on its result, not its source), and this module only
-//! orders them and steps through them. Replacing rewrites what the user
-//! typed, the only thing `edit.replace` can change. Match case
-//! maps onto `matchCase` and the whole-word toggle onto `wholeCell` (a
-//! spreadsheet's "match entire cell contents"). The engine has no regex
-//! or preserve-case search, so those two toggles flip on the panel but
-//! don't change the search.
+//! Matching is the engine's: `edit.find` with `all: true` lists every hit,
+//! and this module only orders them and steps through them. Find alone
+//! looks in what each cell shows (Excel's "Look in: Values" — a formula
+//! cell matches on its result). With the replace row showing it looks in
+//! what the user typed instead ("Look in: Formulas", the only option
+//! Excel's Replace offers), because that is the text `edit.replace`
+//! rewrites: the listed hits and the cells a replace may change are then
+//! the same cells, and Replace All is further restricted to exactly the
+//! listed hits (see [`hits_range`]). Match case maps onto `matchCase` and
+//! the whole-word toggle onto `wholeCell` (a spreadsheet's "match entire
+//! cell contents"). The engine has no regex or preserve-case search, so
+//! those two toggles flip on the panel but don't change the search;
+//! quadraui's `FindReplacePanel` has no way to hide a toggle.
 
 use quadraui::{FR_PANEL_WIDTH, FindReplacePanel, Rect, WidgetId};
 use serde_json::{Value, json};
 
 use crate::address::Address;
+
+/// The replace row's button labels: words rather than glyphs, since no
+/// icon font can be assumed on every backend this runs on.
+pub const REPLACE_ONE_LABEL: &str = "[Replace]";
+pub const REPLACE_ALL_LABEL: &str = "[All]";
 
 /// The open find/replace panel and whether it has the keyboard.
 #[derive(Debug, Clone)]
@@ -55,8 +64,8 @@ impl FindBar {
             in_selection: false,
             group_bounds: Rect::new(0.0, 0.0, 0.0, 0.0),
             panel_width: FR_PANEL_WIDTH,
-            replace_one_glyph: "R1".into(),
-            replace_all_glyph: "R*".into(),
+            replace_one_glyph: REPLACE_ONE_LABEL.into(),
+            replace_all_glyph: REPLACE_ALL_LABEL.into(),
             hit_regions: Vec::new(),
         };
         panel.rebuild_hit_regions();
@@ -88,30 +97,55 @@ impl FindBar {
     }
 
     /// `edit.find`'s parameters for listing every match of the current
-    /// query — `None` while the query is empty.
+    /// query — `None` while the query is empty. Looks in cell values for
+    /// a plain find and in typed input (formula source) while the
+    /// replace row shows, so every hit listed then is one `edit.replace`
+    /// can rewrite.
     pub fn find_all_params(&self) -> Option<Value> {
+        let look_in = if self.panel.show_replace {
+            "formulas"
+        } else {
+            "values"
+        };
         (!self.panel.query.is_empty()).then(|| {
             json!({
                 "what": self.panel.query,
                 "matchCase": self.panel.case_sensitive,
                 "wholeCell": self.panel.whole_word,
-                "lookIn": "values",
+                "lookIn": look_in,
                 "all": true,
             })
         })
     }
 
-    /// `edit.replace`'s parameters: every match when `all`, otherwise
-    /// only the active cell's.
+    /// `edit.replace`'s parameters: every match inside the engine's
+    /// selection when `all` (the caller selects exactly the listed hits
+    /// first), otherwise only the active cell's.
     pub fn replace_params(&self, all: bool) -> Value {
-        json!({
+        let mut params = json!({
             "what": self.panel.query,
             "with": self.panel.replacement,
             "matchCase": self.panel.case_sensitive,
             "wholeCell": self.panel.whole_word,
             "all": all,
-        })
+        });
+        if all {
+            params["within"] = json!("selection");
+        }
+        params
     }
+}
+
+/// `hits` as one multi-area range for `selection.set` (`"A1,C3,F12"`) —
+/// what Replace All selects so it can only touch cells Find listed.
+/// `None` with no hits.
+pub fn hits_range(hits: &[(usize, usize)]) -> Option<String> {
+    (!hits.is_empty()).then(|| {
+        hits.iter()
+            .map(|&(row, col)| Address::new(row as u32, col as u32).a1())
+            .collect::<Vec<_>>()
+            .join(",")
+    })
 }
 
 /// The active sheet's hits from an `edit.find {all: true}` result, in
@@ -225,6 +259,22 @@ mod tests {
         assert_eq!(match_info(&HITS, (0, 0), false), "3 found");
         assert_eq!(match_info(&[], (0, 0), false), "No results");
         assert_eq!(match_info(&[], (0, 0), true), "");
+    }
+
+    #[test]
+    fn replace_mode_searches_the_same_text_replace_rewrites() {
+        let mut bar = FindBar::open(false, "D2".into());
+        assert_eq!(bar.find_all_params().unwrap()["lookIn"], "values");
+        bar.refocus(true);
+        assert_eq!(bar.find_all_params().unwrap()["lookIn"], "formulas");
+        assert_eq!(bar.replace_params(true)["within"], "selection");
+        assert!(bar.replace_params(false).get("within").is_none());
+    }
+
+    #[test]
+    fn hits_become_one_multi_area_range() {
+        assert_eq!(hits_range(&HITS).as_deref(), Some("A2,E2,C8"));
+        assert_eq!(hits_range(&[]), None);
     }
 
     #[test]

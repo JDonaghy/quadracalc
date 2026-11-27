@@ -1,12 +1,12 @@
  File  Home  Insert  Formulas  Data  View                                                           
  A1        fx [Item                                                                                ]
           A    │     D     │    E    │       F        │G │     H      │    I     │   J   │   K   │L│
-    1 Item     │Tier       │Discount │Discounted Total│  │            │          │       │       │ │
+   10 Month    │  Revenue  │ Growth  │  Over target?  │  │At a glance │          │       │       │ │
    11 Jan      │  $2,880.00│         │no              │  │Best month  │Dec       │       │       │ │
    12 Feb      │  $3,240.00│   12.50%│no              │  │Peak revenue│ $8,424.00│       │       │ │
    13 Mar      │  $3,920.00│   20.99%│no              │  │Avg units   │     202.4│       │       │ │
    14 Apr      │  $3,724.00│   -5.00%│no              │  │Target      │ $5,000.00│       │       │ │
-   15 May      │  $4,525.00│   21.51%│no              │  │            │          │       │       │ │
+   15 May      │  $4,525.00│   21.51%│no              │  │Jan→Dec     │   192.50%│       │       │ │
    16 Jun      │  $5,100.00│   12.71%│yes             │  │            │          │       │       │ │
    17 Jul      │  $5,023.50│   -1.50%│yes             │  │            │          │       │       │ │
    18 Aug      │  $5,686.50│   13.20%│yes             │  │            │          │       │       │ │
@@ -14,7 +14,7 @@
    20 Oct      │  $6,136.00│   -2.07%│yes             │  │            │          │       │       │ │
    21 Nov      │  $7,102.00│   15.74%│yes             │  │            │          │       │       │ │
    22 Dec      │  $8,424.00│   18.61%│yes             │  │            │          │       │       │ │
-   23 Total    │ $62,027.00│  192.50%│7 of 12         │  │            │          │       │       │ │
+   23 Total    │ $62,027.00│         │7 of 12         │  │            │          │       │       │ │
    24          │           │         │                │  │            │          │       │       │ │
    25          │           │         │                │  │            │          │       │       │ │
    26          │           │         │                │  │            │          │       │       │ │
@@ -27,4 +27,4 @@
    33          │           │         │                │  │            │          │       │       │ │
    34          │           │         │                │  │            │          │       │       │ │
  Sheet1 │                                                                                           
- READY  A1  Item                 F2 edit · Ctrl+F find · : commands · Alt+H menu · q quit  Count: 1 
+ READY  A1  Item            F2 edit · Ctrl+F find · : commands · Alt+H menu · Ctrl+Q quit  Count: 1 

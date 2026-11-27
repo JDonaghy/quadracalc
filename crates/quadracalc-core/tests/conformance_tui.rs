@@ -105,13 +105,55 @@ fn tui_context_menu_clears_a_cell() {
 }
 
 #[test]
-fn tui_wheel_scrolls_under_a_frozen_header() {
+fn tui_wheel_scrolls_the_view_not_the_cursor() {
     let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
-    scenarios::wheel_scrolls_under_a_frozen_header(&mut driver);
+    scenarios::wheel_scrolls_the_view_not_the_cursor(&mut driver);
 }
 
 #[test]
 fn tui_double_click_edits_in_place() {
     let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
     scenarios::double_click_edits_in_place(&mut driver);
+}
+
+#[test]
+fn tui_replace_all_only_touches_counted_cells() {
+    let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
+    scenarios::replace_all_only_touches_counted_cells(&mut driver);
+}
+
+#[test]
+fn tui_find_panel_keeps_its_own_pointer_gestures() {
+    let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
+    scenarios::find_panel_keeps_its_own_pointer_gestures(&mut driver);
+}
+
+#[test]
+fn tui_shortcuts_work_while_the_find_panel_has_the_keyboard() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 100, 30);
+    scenarios::shortcuts_work_while_the_find_panel_has_the_keyboard(&mut driver);
+}
+
+#[test]
+fn tui_ctrl_q_quits_and_asks_first_with_unsaved_changes() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 100, 30);
+    scenarios::ctrl_q_quits_and_asks_first_with_unsaved_changes(&mut driver);
+}
+
+#[test]
+fn tui_ctrl_q_quits_a_clean_workbook() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 100, 30);
+    scenarios::ctrl_q_quits_a_clean_workbook(&mut driver);
+}
+
+#[test]
+fn tui_one_wheel_notch_scrolls_three_rows() {
+    let mut driver = TuiDriver::new(CalcApp::with_sample().unwrap(), 100, 30);
+    scenarios::one_wheel_notch_scrolls_three_rows(&mut driver);
+}
+
+#[test]
+fn tui_menu_quit_asks_first_with_unsaved_changes() {
+    let mut driver = TuiDriver::new(CalcApp::new(), 100, 30);
+    scenarios::menu_quit_asks_first_with_unsaved_changes(&mut driver);
 }

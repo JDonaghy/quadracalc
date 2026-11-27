@@ -126,13 +126,55 @@ fn mac_context_menu_clears_a_cell() {
 }
 
 #[test]
-fn mac_wheel_scrolls_under_a_frozen_header() {
+fn mac_wheel_scrolls_the_view_not_the_cursor() {
     let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
-    scenarios::wheel_scrolls_under_a_frozen_header(&mut driver);
+    scenarios::wheel_scrolls_the_view_not_the_cursor(&mut driver);
 }
 
 #[test]
 fn mac_double_click_edits_in_place() {
     let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
     scenarios::double_click_edits_in_place(&mut driver);
+}
+
+#[test]
+fn mac_replace_all_only_touches_counted_cells() {
+    let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::replace_all_only_touches_counted_cells(&mut driver);
+}
+
+#[test]
+fn mac_find_panel_keeps_its_own_pointer_gestures() {
+    let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::find_panel_keeps_its_own_pointer_gestures(&mut driver);
+}
+
+#[test]
+fn mac_shortcuts_work_while_the_find_panel_has_the_keyboard() {
+    let mut driver = MacDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::shortcuts_work_while_the_find_panel_has_the_keyboard(&mut driver);
+}
+
+#[test]
+fn mac_ctrl_q_quits_and_asks_first_with_unsaved_changes() {
+    let mut driver = MacDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::ctrl_q_quits_and_asks_first_with_unsaved_changes(&mut driver);
+}
+
+#[test]
+fn mac_ctrl_q_quits_a_clean_workbook() {
+    let mut driver = MacDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::ctrl_q_quits_a_clean_workbook(&mut driver);
+}
+
+#[test]
+fn mac_one_wheel_notch_scrolls_three_rows() {
+    let mut driver = MacDriver::new(CalcApp::with_sample().unwrap(), WIDE_W, WIDE_H);
+    scenarios::one_wheel_notch_scrolls_three_rows(&mut driver);
+}
+
+#[test]
+fn mac_menu_quit_asks_first_with_unsaved_changes() {
+    let mut driver = MacDriver::new(CalcApp::new(), WIDE_W, WIDE_H);
+    scenarios::menu_quit_asks_first_with_unsaved_changes(&mut driver);
 }

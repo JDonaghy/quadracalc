@@ -164,7 +164,14 @@ pub struct CalcApp {
     /// The formula bar's own [`TextField`] state — its caret and a
     /// pointer drag in progress — while the formula bar owns the edit.
     formula_state: TextFieldState,
+    /// A quit was asked for with unsaved changes and the status bar is
+    /// asking for a second one: the workbook revision it warned about —
+    /// see [`CalcApp::request_quit`].
+    quit_armed: Option<u64>,
 }
+
+/// What the status bar says when a quit would lose unsaved changes.
+pub const UNSAVED_QUIT_WARNING: &str = "Unsaved changes: quit again to discard them, or save first";
 
 /// Everything `render` needs, rebuilt after every command or cursor move.
 #[derive(Debug, Clone, Default)]
@@ -238,15 +245,28 @@ impl Mode {
         }
     }
 
-    /// The keys worth knowing in this mode — the status bar's help line.
-    /// `tui` picks the terminal's own palette key (`:`) over the
-    /// chord every backend accepts.
-    fn hints(self, tui: bool) -> &'static str {
+    /// The keys worth knowing in this mode — the status bar's help line,
+    /// longest first: the status bar shows the first that fits. `tui`
+    /// picks the terminal's own palette key (`:`) over the chord every
+    /// backend accepts.
+    fn hints(self, tui: bool) -> &'static [&'static str] {
         match self {
-            Mode::Ready if tui => " F2 edit · Ctrl+F find · : commands · Alt+H menu · q quit ",
-            Mode::Ready => " F2 edit · Ctrl+F find · Ctrl+Shift+P commands · q quit ",
-            Mode::Edit => " Enter commit · Esc cancel · Tab next · Ctrl+A all ",
-            Mode::Find => " Enter next · Shift+Enter prev · Esc close ",
+            Mode::Ready if tui => &[
+                " F2 edit · Ctrl+F find · : commands · Alt+H menu · Ctrl+Q quit ",
+                " F2 edit · ^F find · : cmds · ^Q quit ",
+            ],
+            Mode::Ready => &[
+                " F2 edit · Ctrl+F find · Ctrl+Shift+P commands · Ctrl+Q quit ",
+                " F2 edit · Ctrl+F find · Ctrl+Q quit ",
+            ],
+            Mode::Edit => &[
+                " Enter commit · Esc cancel · Tab next · Ctrl+A all ",
+                " Enter commit · Esc cancel ",
+            ],
+            Mode::Find => &[
+                " Enter next · Shift+Enter prev · Esc close ",
+                " Enter next · Esc close ",
+            ],
         }
     }
 }
@@ -286,11 +306,12 @@ impl CalcApp {
             context_menu_state: ContextMenuState::default(),
             wheel_carry: (0.0, 0.0),
             formula_state: TextFieldState::default(),
+            quit_armed: None,
         }
     }
 
-    /// A workbook with a sample sheet worth a first look: a frozen,
-    /// filled header row and a frozen label column, formulas (`SUM`, a
+    /// A workbook with a sample sheet worth a first look: a frozen label
+    /// column, filled table headers, formulas (`SUM`, a
     /// `VLOOKUP` against a rate table, per-row products, month-on-month
     /// growth, `INDEX`/`MATCH` over the year), currency and percentage
     /// number formats, and column widths sized to their contents — every
@@ -362,11 +383,12 @@ impl CalcApp {
             ("I13", "=ROUND(AVERAGE(B11:B22),1)"),
             ("H14", "Target"),
             ("I14", "5000"),
+            ("H15", "Jan→Dec"),
+            ("I15", "=D22/D11-1"),
             ("A23", "Total"),
             ("B23", "=SUM(B11:B22)"),
             ("C23", "=D23/B23"),
             ("D23", "=SUM(D11:D22)"),
-            ("E23", "=D22/D11-1"),
             ("F23", "=COUNTIF(F11:F22,\"yes\")&\" of 12\""),
         ] {
             app.set_cell(cell, input)?;
@@ -386,13 +408,10 @@ impl CalcApp {
             )?;
         }
 
-        // Header bands: bold white on a dark fill for the frozen top row,
-        // a lighter accent for the monthly table's own header.
-        for (range, fill) in [
-            ("A1:F1", "#1F4E79"),
-            ("A10:F10", "#2E75B6"),
-            ("H10:I10", "#2E75B6"),
-        ] {
+        // Header bands: bold white on an accent fill for the monthly
+        // table's header. Row 1's small tables get bold labels only, so
+        // the cursor's own highlight on A1 stands out at startup.
+        for (range, fill) in [("A10:F10", "#2E75B6"), ("H10:I10", "#2E75B6")] {
             app.execute("home.bold", json!({ "range": range, "on": true }))?;
             app.execute("home.fillColor", json!({ "range": range, "color": fill }))?;
             app.execute(
@@ -400,7 +419,7 @@ impl CalcApp {
                 json!({ "range": range, "color": "#FFFFFF" }),
             )?;
         }
-        for range in ["A4:B4", "A6:B6", "A23:F23", "H11:H14"] {
+        for range in ["A1:F1", "A4:B4", "A6:B6", "A23:F23", "H11:H15"] {
             app.execute("home.bold", json!({ "range": range, "on": true }))?;
         }
         app.execute("home.alignCenter", json!({ "range": "B10:F10" }))?;
@@ -412,7 +431,10 @@ impl CalcApp {
             ("I12", "Currency"),
             ("I14", "Currency"),
             ("E2", "Percentage"),
-            ("E11:E23", "Percentage"),
+            ("B7:B8", "Percentage"),
+            ("E11:E22", "Percentage"),
+            ("I15", "Percentage"),
+            ("B11:B23", "#,##0"),
         ] {
             app.execute(
                 "home.numberFormat",
@@ -434,8 +456,10 @@ impl CalcApp {
         ] {
             app.execute("home.columnWidth", json!({ "cols": cols, "width": px }))?;
         }
-        // Row 1 and column A stay put while the rest scrolls.
-        app.execute("view.freezePanes", json!({ "cell": "B2" }))?;
+        // Column A — every block's labels — stays put while the rest
+        // scrolls sideways. No row is frozen: the sheet's tables each
+        // have their own header row, so no single row labels them all.
+        app.execute("view.freezePanes", json!({ "cell": "B1" }))?;
         Ok(app)
     }
 
@@ -1335,9 +1359,10 @@ impl View {
 
     /// The status bar: mode badge, selection, the cursor cell's formula
     /// and value (or the last error) on the left; key hints and the
-    /// selection summary on the right. The hints only show while
-    /// everything fits in `rect` at `char_width` per character — they
-    /// are the first thing to give way to an error or a long formula.
+    /// selection summary on the right. The hints shrink to a shorter set
+    /// when the full one doesn't fit in `rect` at `char_width` per
+    /// character, and are the first thing to give way entirely to an
+    /// error or a long formula.
     fn status_surface(&self, rect: Rect, char_width: f32) -> Surface {
         let detail = match (&self.error, self.active_input.starts_with('=')) {
             (Some(err), _) => format!(" {err} "),
@@ -1351,6 +1376,24 @@ impl View {
             (false, Mode::Edit) => Color::rgb(140, 90, 10),
             (false, Mode::Find) => Color::rgb(30, 110, 70),
         };
+        let stats = if self.selection_stats.is_empty() {
+            String::new()
+        } else {
+            format!(" {} ", self.selection_stats)
+        };
+        let used = self.mode.badge().chars().count()
+            + self.selection_label.chars().count()
+            + 2
+            + detail.chars().count()
+            + stats.chars().count();
+        let fits =
+            |hints: &str| (used + hints.chars().count()) as f32 * char_width.max(1.0) <= rect.width;
+        let hints = self
+            .mode
+            .hints(self.tui_shaped)
+            .iter()
+            .copied()
+            .find(|h| fits(h));
         let bar = StatusBar {
             id: WidgetId::new("status"),
             left_segments: vec![
@@ -1383,21 +1426,10 @@ impl View {
                 // ordering. The selection summary is the one Excel users
                 // actually look for here, so it goes last/rightmost; the
                 // key hints yield first on a narrow bar.
-                let stats = if self.selection_stats.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {} ", self.selection_stats)
-                };
-                let used = self.mode.badge().chars().count()
-                    + self.selection_label.chars().count()
-                    + 2
-                    + detail.chars().count()
-                    + stats.chars().count()
-                    + self.mode.hints(self.tui_shaped).chars().count();
                 let mut right = Vec::new();
-                if used as f32 * char_width.max(1.0) <= rect.width {
+                if let Some(hints) = hints {
                     right.push(StatusBarSegment {
-                        text: self.mode.hints(self.tui_shaped).into(),
+                        text: hints.into(),
                         fg: Color::rgb(200, 210, 225),
                         bg: bar_bg,
                         bold: false,
@@ -1540,6 +1572,13 @@ impl AppLogic for CalcApp {
 
     fn handle(&mut self, event: UiEvent, backend: &mut dyn Backend) -> Reaction {
         self.error = None;
+        // A pending "quit without saving?" is answered "no" by any key
+        // other than the quit chord itself.
+        if matches!(event, UiEvent::KeyPressed { .. } | UiEvent::CharTyped(_))
+            && !Self::is_quit_chord(&event)
+        {
+            self.quit_armed = None;
+        }
         // The palette is modal: while it's open, every key goes to it
         // (its own doc: "intercept ALL mouse and keyboard events when
         // open") and nothing else in `handle` runs — a click underneath
@@ -1686,6 +1725,12 @@ impl AppLogic for CalcApp {
                 }
                 Handled::Ignored => {}
             }
+        }
+        // Ctrl+Q (Cmd+Q on macOS) quits, asking first when there are
+        // unsaved changes — outside an active edit, and ahead of the find
+        // panel so it works while the panel has the keyboard.
+        if self.grid.editing.is_none() && Self::is_quit_chord(&event) {
+            return self.request_quit(backend);
         }
         // Ctrl+F / Ctrl+H (Cmd on macOS) open find / find-and-replace
         // over the sheet — or, already open, take the keyboard back.
@@ -1874,7 +1919,7 @@ impl AppLogic for CalcApp {
         } = &event
             && self.grid_rect(backend).contains(*position)
         {
-            self.scroll_grid(delta.x, delta.y);
+            self.scroll_grid(delta.x, delta.y, backend);
             self.refresh(backend);
             return Reaction::Redraw;
         }
@@ -1895,15 +1940,16 @@ impl AppLogic for CalcApp {
                 return Reaction::Redraw;
             }
         }
-        // `q`/Escape quit only outside an active edit — while editing, `q`
-        // is a character to insert and Escape cancels the edit instead
-        // (`CellGrid::handle` routes both to the edit buffer while
-        // `editing` is `Some`, same as quadraui's own `cell_grid_demo`).
+        // Escape outside an edit collapses a range selection to the
+        // cursor and otherwise does nothing — it never quits. (While
+        // editing, `CellGrid::handle` cancels the edit with it instead.)
         if self.grid.editing.is_none()
             && let UiEvent::KeyPressed { key, .. } = &event
-            && matches!(key, Key::Char('q') | Key::Named(NamedKey::Escape))
+            && matches!(key, Key::Named(NamedKey::Escape))
         {
-            return Reaction::Exit;
+            self.grid.selection_anchor = None;
+            self.refresh(backend);
+            return Reaction::Redraw;
         }
         // Ctrl+S (Cmd+S on macOS) saves — also only outside an active
         // edit, so the shortcut never fights with typing a literal "s"
@@ -2365,7 +2411,10 @@ impl CalcApp {
     }
 
     /// Replace the match under the cursor (then step to the next one), or
-    /// every match when `all`, through `edit.replace`.
+    /// every listed match when `all`, through `edit.replace`. Replace All
+    /// selects exactly the listed hits and replaces within that
+    /// selection, so it can never rewrite a cell the panel didn't count;
+    /// with no hits it does nothing.
     fn find_replace(&mut self, all: bool, backend: &mut dyn Backend) {
         let Some(bar) = &self.find else { return };
         if bar.panel.query.is_empty() {
@@ -2376,9 +2425,20 @@ impl CalcApp {
             self.find_step(true, backend);
             return;
         }
-        let result = self
-            .sync_selection()
-            .and_then(|()| self.execute("edit.replace", params));
+        let result = if all {
+            let Some(range) = find::hits_range(&self.find_hits) else {
+                return;
+            };
+            let replaced = self
+                .execute("selection.set", json!({ "range": range }))
+                .and_then(|_| self.execute("edit.replace", params));
+            // Put the engine's selection back to the grid's either way.
+            let restored = self.sync_selection();
+            replaced.and_then(|r| restored.map(|()| r))
+        } else {
+            self.sync_selection()
+                .and_then(|()| self.execute("edit.replace", params))
+        };
         match result {
             Ok(r) => {
                 let replaced = r.get("replaced").and_then(Value::as_u64).unwrap_or(0);
@@ -2455,57 +2515,74 @@ impl CalcApp {
     /// a press inside its box (which also gives it the keyboard), and
     /// every key and paste while it has the keyboard. A press anywhere
     /// else hands the keyboard back to the grid and falls through; with
-    /// the grid holding the keyboard, Escape closes the panel instead of
-    /// quitting. `None` for an event the panel doesn't take.
+    /// the grid holding the keyboard, Escape closes the panel. Every
+    /// other pointer gesture inside the box — a double-click (the
+    /// runtime folds a quick second press into one), a right or middle
+    /// press, the wheel — stays with the panel rather than reaching the
+    /// grid cell underneath it. A shortcut chord the panel ignores falls
+    /// through to the app's own shortcuts. `None` for an event the panel
+    /// doesn't take.
     fn route_to_find(&mut self, event: &UiEvent, backend: &mut dyn Backend) -> Option<Reaction> {
         let rect = self.find_rect(backend)?;
         let focused = self.find.as_ref().is_some_and(|f| f.focused);
-        let routed = match event {
+        let left_press = match event {
             UiEvent::MouseDown {
                 button: MouseButton::Left,
                 position,
                 modifiers,
                 ..
-            } if rect.contains(*position) => {
-                if let Some(bar) = &mut self.find {
-                    bar.focused = true;
-                }
-                RoutedEvent::Pointer {
-                    kind: PointerKind::Down(MouseButton::Left),
-                    sub: None,
-                    local: Point::new(position.x - rect.x, position.y - rect.y),
-                    mods: *modifiers,
-                }
+            } => Some((*position, *modifiers)),
+            UiEvent::DoubleClick { position, .. } => Some((*position, Modifiers::default())),
+            _ => None,
+        };
+        let press_inside = left_press.filter(|(position, _)| rect.contains(*position));
+        let routed = if let Some((position, mods)) = press_inside {
+            if let Some(bar) = &mut self.find {
+                bar.focused = true;
             }
-            UiEvent::MouseDown { .. } => {
-                if let Some(bar) = &mut self.find {
-                    bar.focused = false;
+            RoutedEvent::Pointer {
+                kind: PointerKind::Down(MouseButton::Left),
+                sub: None,
+                local: Point::new(position.x - rect.x, position.y - rect.y),
+                mods,
+            }
+        } else {
+            match event {
+                UiEvent::MouseDown { position, .. } | UiEvent::Scroll { position, .. }
+                    if rect.contains(*position) =>
+                {
+                    return Some(Reaction::Continue);
                 }
-                return None;
+                UiEvent::MouseDown { .. } => {
+                    if let Some(bar) = &mut self.find {
+                        bar.focused = false;
+                    }
+                    return None;
+                }
+                UiEvent::WindowResized { .. } => return None,
+                UiEvent::KeyPressed { key, .. }
+                    if !focused
+                        && self.grid.editing.is_none()
+                        && matches!(key, Key::Named(NamedKey::Escape)) =>
+                {
+                    self.close_find();
+                    self.refresh(backend);
+                    return Some(Reaction::Redraw);
+                }
+                _ if !focused => return None,
+                UiEvent::KeyPressed {
+                    key,
+                    modifiers,
+                    repeat,
+                } => RoutedEvent::Key(KeyEvent {
+                    key: key.clone(),
+                    modifiers: *modifiers,
+                    repeat: *repeat,
+                }),
+                UiEvent::ClipboardPaste(text) => RoutedEvent::Text(text.clone()),
+                UiEvent::CharTyped(c) => RoutedEvent::Text(c.to_string()),
+                _ => return None,
             }
-            UiEvent::WindowResized { .. } => return None,
-            UiEvent::KeyPressed { key, .. }
-                if !focused
-                    && self.grid.editing.is_none()
-                    && matches!(key, Key::Named(NamedKey::Escape)) =>
-            {
-                self.close_find();
-                self.refresh(backend);
-                return Some(Reaction::Redraw);
-            }
-            _ if !focused => return None,
-            UiEvent::KeyPressed {
-                key,
-                modifiers,
-                repeat,
-            } => RoutedEvent::Key(KeyEvent {
-                key: key.clone(),
-                modifiers: *modifiers,
-                repeat: *repeat,
-            }),
-            UiEvent::ClipboardPaste(text) => RoutedEvent::Text(text.clone()),
-            UiEvent::CharTyped(c) => RoutedEvent::Text(c.to_string()),
-            _ => return None,
         };
         let bar = self.find.as_ref()?;
         let panel = bar.panel_in(self.grid_rect(backend));
@@ -2519,10 +2596,49 @@ impl CalcApp {
         let reaction = match handled {
             Handled::Event(e) => self.handle_find_event(e, backend),
             Handled::Consumed => Reaction::Redraw,
+            Handled::Ignored if Self::is_shortcut_chord(event) => return None,
             Handled::Ignored => Reaction::Continue,
         };
         self.refresh(backend);
         Some(reaction)
+    }
+
+    /// Ctrl+Q, or Cmd+Q on macOS.
+    fn is_quit_chord(event: &UiEvent) -> bool {
+        matches!(
+            event,
+            UiEvent::KeyPressed { key: Key::Char('q' | 'Q'), modifiers, .. }
+                if (modifiers.ctrl || modifiers.cmd) && !modifiers.shift && !modifiers.alt
+        )
+    }
+
+    /// Quit — at once with nothing unsaved; otherwise the first request
+    /// only warns in the status bar, and a second one (Ctrl+Q, or File ›
+    /// Quit) quits without saving, provided no key was pressed and the
+    /// workbook didn't change in between.
+    fn request_quit(&mut self, backend: &mut dyn Backend) -> Reaction {
+        let revision = self.session.doc().map(|d| d.revision).ok();
+        if !self.is_dirty() || (self.quit_armed.is_some() && self.quit_armed == revision) {
+            return Reaction::Exit;
+        }
+        self.quit_armed = revision;
+        self.error = Some(UNSAVED_QUIT_WARNING.into());
+        self.refresh(backend);
+        Reaction::Redraw
+    }
+
+    /// A key that reads as an app shortcut rather than text or field
+    /// navigation: anything held with Ctrl/Cmd/Alt, or a function key.
+    /// The find panel lets these through when it doesn't use them itself.
+    fn is_shortcut_chord(event: &UiEvent) -> bool {
+        matches!(
+            event,
+            UiEvent::KeyPressed { key, modifiers, .. }
+                if modifiers.ctrl
+                    || modifiers.cmd
+                    || modifiers.alt
+                    || matches!(key, Key::Named(NamedKey::F(_)))
+        )
     }
 
     fn handle_find_event(
@@ -2649,15 +2765,23 @@ impl CalcApp {
     }
 
     /// Scroll the grid by a wheel `delta` (positive `y` = toward the top),
-    /// three rows per notch, carrying any fraction over to the next
-    /// event. The cursor stays where it is.
-    fn scroll_grid(&mut self, dx: f32, dy: f32) {
+    /// three rows or one column per notch, carrying any fraction over to
+    /// the next event. The cursor stays where it is.
+    ///
+    /// `delta` is in the backend's own unit — notches on TUI, GTK and
+    /// Windows, points on macOS — so it goes through
+    /// [`Backend::wheel_delta_rows`] first, against one line of the
+    /// backend's text (the size macOS gives one wheel notch), to land in
+    /// notches everywhere.
+    fn scroll_grid(&mut self, dx: f32, dy: f32, backend: &dyn Backend) {
         const ROWS_PER_NOTCH: f32 = 3.0;
         let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+        let line = backend.line_height();
+        let notches = |v: f32| finite(backend.wheel_delta_rows(finite(v), line));
         // Positive `y` scrolls toward the top; positive `x` toward the
         // right (`quadraui::ScrollDelta`).
-        let rows = self.wheel_carry.1 + quadraui::wheel_delta(finite(dy), ROWS_PER_NOTCH);
-        let cols = self.wheel_carry.0 + finite(dx);
+        let rows = self.wheel_carry.1 + quadraui::wheel_delta(notches(dy), ROWS_PER_NOTCH);
+        let cols = self.wheel_carry.0 + notches(dx);
         let (whole_rows, whole_cols) = (rows.trunc(), cols.trunc());
         self.wheel_carry = (cols - whole_cols, rows - whole_rows);
         let max_row = self
@@ -2854,7 +2978,7 @@ impl CalcApp {
     /// every other catalog id through the engine.
     fn run_command_id(&mut self, id_str: &str, backend: &mut dyn Backend) -> Reaction {
         if id_str == menu::QUIT {
-            return Reaction::Exit;
+            return self.request_quit(backend);
         }
         if id_str == menu::BANDED_ROWS {
             self.striped = !self.striped;
@@ -3171,31 +3295,34 @@ mod tests {
     }
 
     #[test]
-    fn sample_header_row_renders_bold_and_filled_but_the_row_below_does_not() {
+    fn sample_table_header_renders_bold_and_filled_but_the_row_below_does_not() {
         let mut app = CalcApp::with_sample().unwrap();
         let mut b = backend();
         app.setup(&mut b);
         let grid = app.view().grid.as_ref().unwrap();
 
-        // (0, 0) and (0, 1) are A1/B1 — `home.bold`/`home.fillColor`'s
-        // target range in `with_sample` — with no scroll yet.
+        // Row 1's labels are bold but unfilled, so the startup cursor on
+        // A1 keeps its own highlight.
         let a1 = &grid.cells[0][0];
-        let b1 = &grid.cells[0][1];
         assert_eq!(a1.text, "Item");
         assert_eq!(a1.style.bold, Some(true));
-        assert!(a1.style.bg.is_some(), "A1 should carry the header fill");
-        assert_eq!(
-            b1.style.bold,
-            Some(true),
-            "fillColor/bold's range is A1:B1, not just A1"
-        );
-        assert_eq!(b1.style.bg, a1.style.bg);
+        assert_eq!(a1.style.bg, None, "A1 carries no fill");
 
-        // A2, one row down, was never formatted and stays plain.
-        let a2 = &grid.cells[1][0];
-        assert_eq!(a2.text, "Hosting");
-        assert_eq!(a2.style.bold, Some(false));
-        assert_eq!(a2.style.bg, None);
+        // (9, 0) and (9, 1) are A10/B10, the monthly table's header —
+        // `home.bold`/`home.fillColor`'s target range — with no scroll.
+        let a10 = &grid.cells[9][0];
+        let b10 = &grid.cells[9][1];
+        assert_eq!(a10.text, "Month");
+        assert_eq!(a10.style.bold, Some(true));
+        assert!(a10.style.bg.is_some(), "A10 should carry the header fill");
+        assert_eq!(b10.style.bold, Some(true), "the range is A10:F10");
+        assert_eq!(b10.style.bg, a10.style.bg);
+
+        // A11, one row down, has no fill.
+        let a11 = &grid.cells[10][0];
+        assert_eq!(a11.text, "Jan");
+        assert_eq!(a11.style.bold, Some(false));
+        assert_eq!(a11.style.bg, None);
     }
 
     #[test]

@@ -7,15 +7,15 @@
     4 Total    │ $1,209.50│       │           │         │                │  │            │         │
     5          │          │       │           │         │                │  │            │         │
     6 Tier     │Discount  │       │           │         │                │  │            │         │
-    7 Standard │      0.05│       │           │         │                │  │            │         │
-    8 Premium  │      0.15│       │           │         │                │  │            │         │
+    7 Standard │     5.00%│       │           │         │                │  │            │         │
+    8 Premium  │    15.00%│       │           │         │                │  │            │         │
     9          │          │       │           │         │                │  │            │         │
    10 Month    │  Units   │ Price │  Revenue  │ Growth  │  Over target?  │  │At a glance │         │
    11 Jan      │       120│ $24.00│  $2,880.00│         │no              │  │Best month  │Dec      │
    12 Feb      │       135│ $24.00│  ┌─────────────────────┐             │  │Peak revenue│$8,424.00│
    13 Mar      │       160│ $24.50│  │ Cut          Ctrl+X │             │  │Avg units   │    202.4│
    14 Apr      │       152│ $24.50│  │ Copy         Ctrl+C │             │  │Target      │$5,000.00│
-   15 May      │       181│ $25.00│  │ Paste        Ctrl+V │             │  │            │         │
+   15 May      │       181│ $25.00│  │ Paste        Ctrl+V │             │  │Jan→Dec     │  192.50%│
    16 Jun      │       204│ $25.00│  │─────────────────────│             │  │            │         │
    17 Jul      │       197│ $25.50│  │ Insert Row          │             │  │            │         │
    18 Aug      │       223│ $25.50│  │ Delete Row          │             │  │            │         │
@@ -23,7 +23,7 @@
    20 Oct      │       236│ $26.00│  │ Delete Column       │             │  │            │         │
    21 Nov      │       268│ $26.50│  │─────────────────────│             │  │            │         │
    22 Dec      │       312│ $27.00│  │ Clear Contents  Del │             │  │            │         │
-   23 Total    │      2429│ $25.54│ $│ Bold                │f 12         │  │            │         │
+   23 Total    │     2,429│ $25.54│ $│ Bold                │f 12         │  │            │         │
    24          │          │       │  │ Number Format…      │             │  │            │         │
    25          │          │       │  │─────────────────────│             │  │            │         │
  Sheet1 │                            │ Find…        Ctrl+F │                                        
