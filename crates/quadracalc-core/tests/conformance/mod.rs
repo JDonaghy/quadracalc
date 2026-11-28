@@ -26,7 +26,7 @@
 //! drive yet when this file was first written.
 
 use quadraui::testing::{ConformanceDriver, DriverInput};
-use quadraui::{Key, Modifiers, NamedKey, UiEvent};
+use quadraui::{Key, Modifiers, MouseButton, NamedKey, UiEvent};
 
 /// Commit a formula through the real in-cell editor and see its dependent
 /// recalculate on screen in the same frame — `tests/editing.rs`'s own
@@ -620,6 +620,7 @@ pub fn find_panel_keeps_its_own_pointer_gestures<D: ConformanceDriver + DriverIn
     };
     d.dispatch(UiEvent::DoubleClick {
         widget: None,
+        button: MouseButton::Left,
         position: on_panel,
     });
     assert!(
@@ -814,6 +815,7 @@ pub fn double_click_edits_in_place<D: ConformanceDriver + DriverInput>(d: &mut D
     let position = locate(d, "Domains");
     d.dispatch(UiEvent::DoubleClick {
         widget: None,
+        button: MouseButton::Left,
         position,
     });
     d.type_text("!");

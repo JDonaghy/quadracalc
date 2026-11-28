@@ -1925,7 +1925,11 @@ impl AppLogic for CalcApp {
         }
         // Double-click a cell to edit it in place, like F2.
         if self.grid.editing.is_none()
-            && let UiEvent::DoubleClick { position, .. } = &event
+            && let UiEvent::DoubleClick {
+                button: MouseButton::Left,
+                position,
+                ..
+            } = &event
         {
             let rect = self.grid_rect(backend);
             if rect.contains(*position) {
@@ -2532,7 +2536,11 @@ impl CalcApp {
                 modifiers,
                 ..
             } => Some((*position, *modifiers)),
-            UiEvent::DoubleClick { position, .. } => Some((*position, Modifiers::default())),
+            UiEvent::DoubleClick {
+                button: MouseButton::Left,
+                position,
+                ..
+            } => Some((*position, Modifiers::default())),
             _ => None,
         };
         let press_inside = left_press.filter(|(position, _)| rect.contains(*position));
@@ -2570,6 +2578,20 @@ impl CalcApp {
                     return Some(Reaction::Redraw);
                 }
                 _ if !focused => return None,
+                // Ctrl/Cmd+Z (with or without Shift) is the workbook's
+                // undo even while the panel has the keyboard. The panel
+                // reads it as an edit of its own query but keeps no edit
+                // history to serve it, so it would swallow the chord and
+                // do nothing.
+                UiEvent::KeyPressed {
+                    key: Key::Char('z' | 'Z'),
+                    modifiers,
+                    ..
+                } if (modifiers.ctrl || modifiers.cmd)
+                    && !(modifiers.ctrl && modifiers.alt && !modifiers.cmd) =>
+                {
+                    return None;
+                }
                 UiEvent::KeyPressed {
                     key,
                     modifiers,

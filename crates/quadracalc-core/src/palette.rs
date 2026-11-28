@@ -528,6 +528,7 @@ impl CommandPalette {
             create_label: None,
             preview: None,
             mode: PaletteMode::List,
+            show_mode_badge: true,
         }
     }
 }

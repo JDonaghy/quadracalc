@@ -235,6 +235,8 @@ pub fn list_view(names: &[NameEntry], selected: Option<usize>) -> ListView {
         max_content_width: None,
         show_v_scrollbar: true,
         striped: false,
+        items_window: None,
+        scroll_px: None,
     }
 }
 

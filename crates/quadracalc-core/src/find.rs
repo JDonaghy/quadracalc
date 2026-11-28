@@ -20,8 +20,7 @@
 //! listed hits (see [`hits_range`]). Match case maps onto `matchCase` and
 //! the whole-word toggle onto `wholeCell` (a spreadsheet's "match entire
 //! cell contents"). The engine has no regex or preserve-case search, so
-//! those two toggles flip on the panel but don't change the search;
-//! quadraui's `FindReplacePanel` has no way to hide a toggle.
+//! those two toggles flip on the panel but don't change the search.
 
 use quadraui::{FR_PANEL_WIDTH, FindReplacePanel, Rect, WidgetId};
 use serde_json::{Value, json};
@@ -67,6 +66,7 @@ impl FindBar {
             replace_one_glyph: REPLACE_ONE_LABEL.into(),
             replace_all_glyph: REPLACE_ALL_LABEL.into(),
             hit_regions: Vec::new(),
+            hidden_toggles: Vec::new(),
         };
         panel.rebuild_hit_regions();
         Self {
